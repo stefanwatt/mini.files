@@ -629,6 +629,8 @@ MiniFiles.config = {
     permanent_delete = true,
     -- Whether to use for editing directories
     use_as_default_explorer = true,
+    -- Whether to be prompted for confirmation when performing filesystem actions
+    confirm_fs_actions = true,
   },
 
   -- Customization of explorer windows
@@ -2392,6 +2394,9 @@ end
 
 -- File system actions --------------------------------------------------------
 H.fs_actions_confirm = function(fs_actions)
+  if not MiniFiles.config.options.confirm_fs_actions then
+		return true
+	end
   local msg = table.concat(H.fs_actions_to_lines(fs_actions), '\n')
   local confirm_res = vim.fn.confirm(msg, '&Yes\n&No', 1, 'Question')
   return confirm_res == 1
