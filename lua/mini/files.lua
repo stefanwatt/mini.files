@@ -1,4 +1,4 @@
-local api = require("lua.mini.api")
+local explorer = require("lua.mini.explorer")
 local utils = require("lua.mini.utils")
 local highlight = require("lua.mini.highlight")
 ---@alias __minifiles_fs_entry_data_fields   - <fs_type> `(string)` - one of "file" or "directory".
@@ -12,8 +12,8 @@ local highlight = require("lua.mini.highlight")
 
 -- Module definition ==========================================================
 local M = {
-	open = api.open,
-	close = api.close,
+	open = explorer.open,
+	close = explorer.close,
 }
 
 --- Module setup
