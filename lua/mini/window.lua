@@ -93,7 +93,7 @@ end
 function M.window_close(win_id)
   if win_id == nil then return end
   local has_buffer, buf_id = pcall(vim.api.nvim_win_get_buf, win_id)
-  if has_buffer then M.opened_buffers[buf_id].win_id = nil end
+  if has_buffer then require("mini.buffer").opened_buffers[buf_id].win_id = nil end
   pcall(vim.api.nvim_win_close, win_id, true)
 end
 
@@ -123,10 +123,10 @@ function M.window_set_cursor(win_id, cursor)
   vim.api.nvim_win_set_cursor(win_id, cursor)
 
   -- Tweak cursor here and don't rely on `CursorMoved` event to reduce flicker
-  M.window_tweak_cursor(win_id, vim.api.nvim_win_get_buf(win_id))
+  M.tweak_cursor(win_id, vim.api.nvim_win_get_buf(win_id))
 end
 
-function M.window_tweak_cursor(win_id, buf_id)
+function M.tweak_cursor(win_id, buf_id)
   local cursor = vim.api.nvim_win_get_cursor(win_id)
   local l = M.get_bufline(buf_id, cursor[1])
 

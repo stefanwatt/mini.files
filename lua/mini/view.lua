@@ -1,13 +1,14 @@
 local buffer    = require("mini.buffer")
+local win    = require("mini.window")
 local highlight = require("mini.highlight")
 local utils     = require("mini.utils")
 local M         = {}
 
-function M.view_ensure_proper(view, path, opts)
+function M.view_ensure_proper(view, path, opts, setup_keymaps)
 	-- Ensure proper buffer
 	if not utils.is_valid_buf(view.buf_id) then
 		buffer.buffer_delete(view.buf_id)
-		view.buf_id = buffer.buffer_create(path, opts.mappings)
+		view.buf_id = buffer.buffer_create(path, opts.mappings, setup_keymaps)
 		-- Make sure that pressing `u` in new buffer does nothing
 		local cache_undolevels = vim.bo[view.buf_id].undolevels
 		vim.bo[view.buf_id].undolevels = -1
@@ -24,30 +25,30 @@ function M.view_ensure_proper(view, path, opts)
 	return view
 end
 
-function M.view_encode_cursor(view)
+function M.encode_cursor(view)
 	local buf_id, cursor = view.buf_id, view.cursor
-	if not M.is_valid_buf(buf_id) or type(cursor) ~= "table" then
+	if not utils.is_valid_buf(buf_id) or type(cursor) ~= "table" then
 		return view
 	end
 
 	-- Replace exact cursor coordinates with entry name to try and find later.
 	-- This allows more robust opening explorer from history (as directory
 	-- content may have changed and exact cursor position would be not valid).
-	local l = M.get_bufline(buf_id, cursor[1])
-	view.cursor = M.match_line_entry_name(l)
+	local l = utils.get_bufline(buf_id, cursor[1])
+	view.cursor = utils.match_line_entry_name(l)
 	return view
 end
 
 function M.view_decode_cursor(view)
 	local buf_id, cursor = view.buf_id, view.cursor
-	if not M.is_valid_buf(buf_id) or type(cursor) ~= "string" then
+	if not utils.is_valid_buf(buf_id) or type(cursor) ~= "string" then
 		return view
 	end
 
 	-- Find entry name named as stored in `cursor`. If not - use {1, 0}.
 	local lines = vim.api.nvim_buf_get_lines(buf_id, 0, -1, false)
 	for i, l in ipairs(lines) do
-		if cursor == M.match_line_entry_name(l) then
+		if cursor == utils.match_line_entry_name(l) then
 			view.cursor = { i, 0 }
 		end
 	end
@@ -60,7 +61,7 @@ function M.view_decode_cursor(view)
 end
 
 function M.view_invalidate_buffer(view)
-	M.buffer_delete(view.buf_id)
+	buffer.buffer_delete(view.buf_id)
 	view.buf_id = nil
 	view.children_path_ids = nil
 	return view
@@ -75,12 +76,12 @@ M.view_track_cursor = vim.schedule_wrap(function(data)
 	end
 
 	local win_id = buf_data.win_id
-	if not M.is_valid_win(win_id) then
+	if not utils.is_valid_win(win_id) then
 		return
 	end
 
 	-- Ensure cursor doesn't go over path id and icon
-	local cur_cursor = M.window_tweak_cursor(win_id, buf_id)
+	local cur_cursor = win.tweak_cursor(win_id, buf_id)
 
 	-- Ensure cursor line doesn't contradict window on the right
 	local tabpage_id = vim.api.nvim_win_get_tabpage(win_id)
@@ -122,7 +123,7 @@ function M.view_track_text_change(data)
 	end
 
 	-- Track window height
-	if not M.is_valid_win(win_id) then
+	if not utils.is_valid_win(win_id) then
 		return
 	end
 

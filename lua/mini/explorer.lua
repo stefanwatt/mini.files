@@ -6,6 +6,57 @@ local win = require("mini.window")
 local fs = require("mini.fs")
 local M = {}
 
+
+M.map = function(mode, lhs, rhs, opts)
+  if lhs == '' then return end
+  opts = vim.tbl_deep_extend('force', { silent = true }, opts or {})
+  vim.keymap.set(mode, lhs, rhs, opts)
+end
+
+---@param buf_id number
+---@param mappings string[]
+local function setup_keymaps(buf_id, mappings)
+	local go_in_visual = function()
+		-- React only on linewise mode, as others can be used for editing
+		if vim.fn.mode() ~= "V" then
+			return mappings.go_in
+		end
+
+		-- Schedule actions because they are not allowed inside expression mapping
+		local line_1, line_2 = vim.fn.line("v"), vim.fn.line(".")
+		local from_line, to_line = math.min(line_1, line_2), math.max(line_1, line_2)
+		vim.schedule(function()
+			local explorer = M.explorer_get()
+			explorer = M.explorer_go_in_range(explorer, buf_id, from_line, to_line)
+			M.explorer_refresh(explorer)
+		end)
+
+		-- Go to Normal mode. '\28\14' is an escaped version of `<C-\><C-n>`.
+		return [[<C-\><C-n>]]
+	end
+
+	local buf_map = function(mode, lhs, rhs, desc)
+		-- Use `nowait` to account for non-buffer mappings starting with `lhs`
+		M.map(mode, lhs, rhs, { buffer = buf_id, desc = desc, nowait = true })
+	end
+
+  --stylua: ignore start
+  buf_map('n', mappings.close,       M.close,       'Close')
+  buf_map('n', mappings.go_in,       M.go_in_with_count,      'Go in entry')
+  buf_map('n', mappings.go_in_plus,  M.go_in_plus,            'Go in entry plus')
+  buf_map('n', mappings.go_out,      M.go_out_with_count,     'Go out of directory')
+  buf_map('n', mappings.go_out_plus, M.go_out_plus,           'Go out of directory plus')
+  buf_map('n', mappings.reset,       M.reset,       'Reset')
+  buf_map('n', mappings.reveal_cwd,  M.reveal_cwd,  'Reveal cwd')
+  buf_map('n', mappings.show_help,   M.show_help,   'Show Help')
+  buf_map('n', mappings.synchronize, M.synchronize, 'Synchronize')
+  buf_map('n', mappings.trim_left,   M.trim_left,   'Trim branch left')
+  buf_map('n', mappings.trim_right,  M.trim_right,  'Trim branch right')
+
+  M.map('x', mappings.go_in, go_in_visual, { buffer = buf_id, desc = 'Go in selected entries', expr = true })
+	--stylua: ignore end
+end
+
 -- History of explorers per root directory
 M.explorer_path_history = {}
 
@@ -131,7 +182,7 @@ function M.close()
 	end
 
 	-- Stop tracking lost focus
-	pcall(vim.loop.timer_stop, utils.timers.focus)
+	pcall(vim.loop.timer_stop, M.timers.focus)
 
 	-- Confirm close if there is modified buffer
 	if not M.confirm_modified(explorer, "close") then
@@ -165,7 +216,7 @@ function M.close()
 
 	-- Invalidate views
 	for path, v in pairs(explorer.views) do
-		explorer.views[path] = view.view_invalidate_buffer(view.view_encode_cursor(v))
+		explorer.views[path] = view.view_invalidate_buffer(view.encode_cursor(v))
 	end
 
 	-- Update histories and unmark as opened
@@ -236,15 +287,17 @@ function M.explorer_refresh(explorer, opts)
 
 	if opts.force_update then
 		for path, v in pairs(explorer.views) do
-			view = M.view_encode_cursor(v)
-			view.children_path_ids = M.buffer_update(v.buf_id, path, explorer.opts)
+			v = view.encode_cursor(v)
+			v.children_path_ids = buffer.buffer_update(v.buf_id, path, explorer.opts)
 			explorer.views[path] = v
 		end
 	end
 
 	for _, win_id in ipairs(explorer.windows) do
 		local buf_id = vim.api.nvim_win_get_buf(win_id)
-		M.opened_buffers[buf_id].win_id = nil
+		-- TODO: i think i need to require this everytime
+		-- and i got tons of stuff like this everywhere
+		buffer.opened_buffers[buf_id].win_id = nil
 	end
 
 	-- Always show three columns
@@ -281,7 +334,7 @@ function M.refresh_preview_window(explorer, win_count, win_col, win_width, previ
 	local views, windows, opts = explorer.views, explorer.windows, explorer.opts
 
 	local v = views[preview_path] or {}
-	v = view.view_ensure_proper(v, preview_path, opts)
+	v = view.view_ensure_proper(v, preview_path, opts, setup_keymaps)
 	views[preview_path] = v
 
 	local config = {
@@ -345,7 +398,7 @@ function M.explorer_normalize(explorer)
 
 	-- Close all unnecessary windows
 	for i = cur_max_depth + 1, #explorer.windows do
-		M.window_close(explorer.windows[i])
+		win.window_close(explorer.windows[i])
 		explorer.windows[i] = nil
 	end
 
@@ -443,7 +496,7 @@ function M.compute_fs_actions(explorer)
 	-- Compute differences
 	local fs_diffs = {}
 	for _, v in pairs(explorer.views) do
-		local dir_fs_diff = M.buffer_compute_fs_diff(v.buf_id, v.children_path_ids)
+		local dir_fs_diff = buffer.compute_fs_diff(v.buf_id, v.children_path_ids)
 		if #dir_fs_diff > 0 then
 			vim.list_extend(fs_diffs, dir_fs_diff)
 		end
@@ -471,7 +524,7 @@ function M.compute_fs_actions(explorer)
 	local copy = {}
 	for _, diff in pairs(raw_copy) do
 		if delete_map[diff.from] then
-			if M.fs_get_parent(diff.from) == M.fs_get_parent(diff.to) then
+			if fs.get_parent(diff.from) == fs.get_parent(diff.to) then
 				table.insert(rename, diff)
 			else
 				table.insert(move, diff)
@@ -492,7 +545,7 @@ function M.update_cursors(explorer)
 	for _, win_id in ipairs(explorer.windows) do
 		if utils.is_valid_win(win_id) then
 			local buf_id = vim.api.nvim_win_get_buf(win_id)
-			local path = M.opened_buffers[buf_id].path
+			local path = buffer.opened_buffers[buf_id].path
 			explorer.views[path].cursor = vim.api.nvim_win_get_cursor(win_id)
 		end
 	end
@@ -505,7 +558,7 @@ function M.refresh_depth_window(explorer, depth, win_count, win_col, win_width, 
 
 	local v = views[path] or {}
 	if path ~= "" then
-		v = view.view_ensure_proper(v, path, opts)
+		v = view.view_ensure_proper(v, path, opts, setup_keymaps)
 		views[path] = v
 	else
 		-- Create an empty buffer for empty paths
@@ -548,7 +601,7 @@ end
 function M.confirm_modified(explorer, action_name)
 	local has_modified = false
 	for _, v in pairs(explorer.views) do
-		if M.is_modified_buffer(v.buf_id) then
+		if buffer.is_modified_buffer(v.buf_id) then
 			has_modified = true
 		end
 	end
@@ -600,13 +653,13 @@ end
 
 function M.open_directory(explorer, path, target_depth)
 	explorer.depth_focus = 2 -- Always keep focus on middle column
-	explorer.branch = { M.fs_get_parent(path) or "", path, "" }
+	explorer.branch = { fs.get_parent(path) or "", path, "" }
 	return explorer
 end
 
 function M.open_root_parent(explorer)
 	local root = explorer.branch[1]
-	local root_parent = M.fs_get_parent(root)
+	local root_parent = fs.get_parent(root)
 	if root_parent == nil then
 		return explorer
 	end
@@ -615,7 +668,7 @@ function M.open_root_parent(explorer)
 	table.insert(explorer.branch, 1, root_parent)
 
 	-- Focus on previous root entry in its parent
-	return M.focus_on_entry(explorer, root_parent, M.fs_get_basename(root))
+	return M.focus_on_entry(explorer, root_parent, fs.get_basename(root))
 end
 
 function M.trim_branch_right(explorer)
@@ -809,7 +862,9 @@ function M.go_in(opts)
 
 	local should_close = opts.close_on_file
 	if should_close then
-		local fs_entry = fs.get_fs_entry()
+		local validated_buf_id = buffer.validate_opened_buffer()
+		local validated_line = buffer.validate_line(validated_buf_id)
+		local fs_entry = fs.get_fs_entry(validated_buf_id,validated_line)
 		should_close = fs_entry ~= nil and fs_entry.fs_type == "file"
 	end
 
@@ -858,7 +913,7 @@ function M.go_out()
 	-- Make sure the views are properly initialized for all paths in the branch
 	for i, path in ipairs(explorer.branch) do
 		if path ~= "" and not explorer.views[path] then
-			explorer.views[path] = view.view_ensure_proper({}, path, explorer.opts)
+			explorer.views[path] = view.view_ensure_proper({}, path, explorer.opts, setup_keymaps)
 		end
 	end
 
@@ -866,8 +921,8 @@ function M.go_out()
 
 	-- Ensure the explorer is still registered as open
 	local tabpage_id = vim.api.nvim_get_current_tabpage()
-	utils.opened_explorers[tabpage_id] = refreshed_explorer or explorer
-	utils.update_preview(explorer)
+	M.opened_explorers[tabpage_id] = refreshed_explorer or explorer
+	M.update_preview(explorer)
 end
 --- Trim left part of branch
 ---

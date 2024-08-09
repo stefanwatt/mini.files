@@ -12,16 +12,17 @@ local M = {}
 --   initial `buf_set_lines` (`noautocmd` doesn't quick work for this event).
 M.opened_buffers = {}
 
-function M.buffer_create(path, mappings)
+---@param path string
+---@param setup_keymaps function(number,string[])
+function M.buffer_create(path, mappings, setup_keymaps)
 	-- Create buffer
 	local buf_id = vim.api.nvim_create_buf(false, true)
 
 	-- Register buffer
 	M.opened_buffers[buf_id] = { path = path }
 
-	-- Make buffer mappings
-	-- M.buffer_make_mappings(buf_id, mappings)
 
+	setup_keymaps(buf_id, mappings)
 	-- Make buffer autocommands
 	local augroup = vim.api.nvim_create_augroup("MiniFiles", { clear = false })
 	local au = function(events, desc, callback)
@@ -140,7 +141,7 @@ function M.buffer_delete(buf_id)
 	M.opened_buffers[buf_id] = nil
 end
 
-function M.buffer_compute_fs_diff(buf_id, ref_path_ids)
+function M.compute_fs_diff(buf_id, ref_path_ids)
 	if not M.is_modified_buffer(buf_id) then
 		return {}
 	end
