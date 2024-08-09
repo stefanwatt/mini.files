@@ -1,7 +1,9 @@
-local highlight = require("lua.mini.highlight")
-local utils = require("lua.mini.utils")
-local view = require("lua.mini.view")
-local fs = require("lua.mini.fs")
+local highlight = require("mini.highlight")
+local utils = require("mini.utils")
+local view = require("mini.view")
+local buffer = require("mini.buffer")
+local win = require("mini.window")
+local fs = require("mini.fs")
 local M = {}
 
 -- History of explorers per root directory
@@ -31,7 +33,7 @@ M.opened_explorers = {}
 ---@field is_corrupted boolean Whether this particular explorer can not be
 ---   normalized and should be closed.
 ---@private
-function M.explorer_new(path)
+function M.new(path)
 	return {
 		branch = { path },
 		depth_focus = 1,
@@ -43,11 +45,11 @@ function M.explorer_new(path)
 	}
 end
 
-function M.explorer_get(tabpage_id)
+function M.get(tabpage_id)
 	tabpage_id = tabpage_id or vim.api.nvim_get_current_tabpage()
 	local res = M.opened_explorers[tabpage_id]
 
-	if M.explorer_is_visible(res) then
+	if M.is_visible(res) then
 		return res
 	end
 
@@ -87,9 +89,9 @@ function M.open(path, use_latest, opts)
 	-- Get explorer to open
 	local explorer
 	if use_latest then
-		explorer = xp.explorer_path_history[path]
+		explorer = M.explorer_path_history[path]
 	end
-	explorer = explorer or xp.explorer_new(path)
+	explorer = explorer or M.new(path)
 
 	-- Update explorer data. Don't use current explorer's data to allow more
 	-- interactive config change by modifying global/local configs.
@@ -106,14 +108,14 @@ function M.open(path, use_latest, opts)
 	explorer.depth_focus = 2 -- Always focus on the middle column
 
 	-- Refresh and register as opened
-	xp.explorer_refresh(explorer)
+	M.explorer_refresh(explorer)
 
 	-- Register latest used path
 	fs.latest_paths[vim.api.nvim_get_current_tabpage()] = path
 
 	-- Track lost focus
-	xp.explorer_track_lost_focus()
-	xp.update_preview(explorer)
+	M.explorer_track_lost_focus()
+	M.update_preview(explorer)
 
 	-- Trigger appropriate event
 	utils.trigger_event("MiniFilesExplorerOpen")
@@ -123,7 +125,7 @@ end
 ---
 ---@return boolean|nil Whether closing was done or `nil` if there was nothing to close.
 function M.close()
-	local explorer = xp.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return nil
 	end
@@ -132,7 +134,7 @@ function M.close()
 	pcall(vim.loop.timer_stop, utils.timers.focus)
 
 	-- Confirm close if there is modified buffer
-	if not xp.explorer_confirm_modified(explorer, "close") then
+	if not M.confirm_modified(explorer, "close") then
 		return false
 	end
 
@@ -140,12 +142,12 @@ function M.close()
 	utils.trigger_event("MiniFilesExplorerClose")
 
 	-- Focus on target window
-	explorer = xp.explorer_ensure_target_window(explorer)
+	explorer = M.ensure_target_window(explorer)
 	-- - Use `pcall()` because window might still be invalid
 	pcall(vim.api.nvim_set_current_win, explorer.target_window)
 
 	-- Update currently shown cursors
-	explorer = xp.explorer_update_cursors(explorer)
+	explorer = M.update_cursors(explorer)
 
 	-- Close shown explorer windows
 	for i, win_id in pairs(explorer.windows) do
@@ -168,19 +170,19 @@ function M.close()
 
 	-- Update histories and unmark as opened
 	local tabpage_id, anchor = vim.api.nvim_get_current_tabpage(), explorer.anchor
-	xp.explorer_path_history[anchor] = explorer
-	xp.opened_explorers[tabpage_id] = nil
+	M.explorer_path_history[anchor] = explorer
+	M.opened_explorers[tabpage_id] = nil
 
 	-- Return `true` indicating success in closing
 	return true
 end
 
-function M.explorer_is_visible(explorer)
+function M.is_visible(explorer)
 	if explorer == nil then
 		return nil
 	end
 	for _, win_id in ipairs(explorer.windows) do
-		if M.is_valid_win(win_id) then
+		if utils.is_valid_win(win_id) then
 			return true
 		end
 	end
@@ -194,22 +196,25 @@ function M.update_preview(explorer)
 
 	local middle_win = explorer.windows[2]
 	local preview_win = explorer.windows[3]
-	if not (M.is_valid_win(middle_win) and M.is_valid_win(preview_win)) then
+	if not (utils.is_valid_win(middle_win) and utils.is_valid_win(preview_win)) then
 		return
 	end
 
 	local middle_buf = vim.api.nvim_win_get_buf(middle_win)
-	if not M.is_opened_buffer(middle_buf) then
+	if not buffer.is_opened_buffer(middle_buf) then
 		return
 	end
 
 	local middle_path = explorer.branch[2]
 	local cursor = vim.api.nvim_win_get_cursor(middle_win)
-	local fs_entry = MiniFiles.get_fs_entry(middle_buf, cursor[1])
+
+  local validated_buf_id = buffer.validate_opened_buffer(middle_buf)
+  local validated_line = buffer.validate_line(validated_buf_id, cursor[1])
+	local fs_entry = fs.get_fs_entry(validated_buf_id, validated_line)
 
 	if fs_entry then
 		local preview_path = fs_entry.fs_type == "directory" and fs_entry.path or middle_path
-		M.explorer_refresh_preview_window(explorer, 3, preview_win, explorer.opts.windows.width_preview, preview_path)
+		M.refresh_preview_window(explorer, 3, preview_win, explorer.opts.windows.width_preview, preview_path)
 	end
 end
 
@@ -217,7 +222,7 @@ function M.explorer_refresh(explorer, opts)
 	explorer = M.explorer_normalize(explorer)
 	if explorer.is_corrupted then
 		explorer.is_corrupted = false
-		MiniFiles.close()
+		M.close()
 		return
 	end
 	if #explorer.branch == 0 then
@@ -226,7 +231,7 @@ function M.explorer_refresh(explorer, opts)
 	opts = opts or {}
 
 	if not opts.skip_update_cursor then
-		explorer = M.explorer_update_cursors(explorer)
+		explorer = M.update_cursors(explorer)
 	end
 
 	if opts.force_update then
@@ -249,21 +254,21 @@ function M.explorer_refresh(explorer, opts)
 	-- Left column (parent or empty)
 	local left_path = explorer.branch[1] or ""
 
-	M.explorer_refresh_depth_window(explorer, 1, 1, 0, col_width, left_path)
+	M.refresh_depth_window(explorer, 1, 1, 0, col_width, left_path)
 
 	-- Middle column (current focus)
 	local middle_path = explorer.branch[2] or ""
 
-	M.explorer_refresh_depth_window(explorer, 2, 2, col_width, col_width, middle_path)
+	M.refresh_depth_window(explorer, 2, 2, col_width, col_width, middle_path)
 
 	-- Right column (preview)
 	local right_path = explorer.branch[3] or ""
 
-	M.explorer_refresh_preview_window(explorer, 3, col_width * 2, col_width, right_path)
+	M.refresh_preview_window(explorer, 3, col_width * 2, col_width, right_path)
 
 	-- Always focus on the middle window
 	local win_id_focused = explorer.windows[2]
-	M.window_focus(win_id_focused)
+	win.window_focus(win_id_focused)
 
 	local tabpage_id = vim.api.nvim_win_get_tabpage(win_id_focused)
 	M.opened_explorers[tabpage_id] = explorer
@@ -272,39 +277,43 @@ function M.explorer_refresh(explorer, opts)
 end
 
 -- Add a new function to handle the preview window
-function M.explorer_refresh_preview_window(explorer, win_count, win_col, win_width, preview_path)
+function M.refresh_preview_window(explorer, win_count, win_col, win_width, preview_path)
 	local views, windows, opts = explorer.views, explorer.windows, explorer.opts
 
 	local v = views[preview_path] or {}
-	v = M.view_ensure_proper(v, preview_path, opts)
+	v = view.view_ensure_proper(v, preview_path, opts)
 	views[preview_path] = v
 
 	local config = {
 		col = win_col,
-		height = M.window_get_max_height(),
+		height = win.window_get_max_height(),
 		width = win_width - 1, -- Subtract 1 to prevent cut-off
 		title = "Preview",
 	}
 
 	local win_id = windows[win_count]
-	if not M.is_valid_win(win_id) then
-		M.window_close(win_id)
-		win_id = M.window_open(view.buf_id, config)
+	if not utils.is_valid_win(win_id) then
+		win.window_close(win_id)
+		win_id = win.window_open(v.buf_id, config)
 		windows[win_count] = win_id
 	end
 
-	M.window_update(win_id, config)
-	M.window_set_view(win_id, view)
+	win.window_update(win_id, config)
+	win.window_set_view(win_id, v)
 
-	M.trigger_event("MiniFilesWindowUpdate", { buf_id = vim.api.nvim_win_get_buf(win_id), win_id = win_id })
+	utils.trigger_event("MiniFilesWindowUpdate", { buf_id = vim.api.nvim_win_get_buf(win_id), win_id = win_id })
 
 	explorer.views = views
 	explorer.windows = windows
 end
 
+M.timers = {
+  focus = vim.loop.new_timer(),
+}
+
 function M.explorer_track_lost_focus()
 	local track = vim.schedule_wrap(function()
-		local explorer = M.explorer_get()
+		local explorer = M.get()
 		if explorer == nil then
 			return
 		end
@@ -314,7 +323,7 @@ function M.explorer_track_lost_focus()
 			return
 		end
 
-		MiniFiles.close()
+		M.close()
 	end)
 	M.timers.focus:start(1000, 1000, track)
 end
@@ -323,7 +332,7 @@ function M.explorer_normalize(explorer)
 	-- Ensure that all paths from branch are valid present paths
 	local norm_branch = {}
 	for _, path in ipairs(explorer.branch) do
-		if not M.fs_is_present_path(path) then
+		if not fs.does_path_exist(path) then
 			break
 		end
 		table.insert(norm_branch, path)
@@ -342,7 +351,7 @@ function M.explorer_normalize(explorer)
 
 	-- Compute if explorer is corrupted and should not operate further
 	for _, win_id in pairs(explorer.windows) do
-		if not M.is_valid_win(win_id) then
+		if not utils.is_valid_win(win_id) then
 			explorer.is_corrupted = true
 		end
 	end
@@ -369,11 +378,11 @@ function M.explorer_sync_cursor_and_branch(explorer, depth)
 
 	-- Compute if path at cursor and path to the right are equal (in sync)
 	local cursor_path
-	if type(cursor) == "table" and M.is_valid_buf(buf_id) then
+	if type(cursor) == "table" and utils.is_valid_buf(buf_id) then
 		local l = M.get_bufline(buf_id, cursor[1])
-		cursor_path = M.path_index[M.match_line_path_id(l)]
+		cursor_path = fs.path_index[utils.match_line_path_id(l)]
 	elseif type(cursor) == "string" then
-		cursor_path = M.fs_child_path(path, cursor)
+		cursor_path = fs.child_path(path, cursor)
 	else
 		return explorer
 	end
@@ -390,7 +399,7 @@ function M.explorer_sync_cursor_and_branch(explorer, depth)
 
 	-- Show preview to the right of current buffer if needed
 	local show_preview = explorer.opts.windows.preview
-	local path_is_present = type(cursor_path) == "string" and M.fs_is_present_path(cursor_path)
+	local path_is_present = type(cursor_path) == "string" and fs.does_path_exist(cursor_path)
 	local is_cur_buf = explorer.depth_focus == depth
 	if show_preview and path_is_present and is_cur_buf then
 		table.insert(explorer.branch, cursor_path)
@@ -399,23 +408,25 @@ function M.explorer_sync_cursor_and_branch(explorer, depth)
 	return explorer
 end
 
-function M.explorer_go_in_range(explorer, buf_id, from_line, to_line)
-	local fs_entry = MiniFiles.get_fs_entry(buf_id, from_line)
+function M.go_in_range(explorer, buf_id, from_line, to_line)
+  local validated_buf_id = buffer.validate_opened_buffer(buf_id)
+  local validated_line = buffer.validate_line(validated_buf_id, from_line)
+	local fs_entry = fs.get_fs_entry(validated_buf_id, validated_line)
 	if fs_entry and fs_entry.fs_type == "directory" then
-		explorer = M.explorer_open_directory(explorer, fs_entry.path, explorer.depth_focus + 1)
+		explorer = M.open_directory(explorer, fs_entry.path, explorer.depth_focus + 1)
 	elseif fs_entry and fs_entry.fs_type == "file" then
-		explorer = M.explorer_open_file(explorer, fs_entry.path)
+		explorer = M.open_file(explorer, fs_entry.path)
 	end
 	return explorer
 end
 
-function M.explorer_focus_on_entry(explorer, path, entry_name)
+function M.focus_on_entry(explorer, path, entry_name)
 	if entry_name == nil then
 		return explorer
 	end
 
 	-- Set focus on directory. Reset if it is not in current branch.
-	explorer.depth_focus = M.explorer_get_path_depth(explorer, path)
+	explorer.depth_focus = M.get_path_depth(explorer, path)
 	if explorer.depth_focus == nil then
 		explorer.branch, explorer.depth_focus = { path }, 1
 	end
@@ -428,7 +439,7 @@ function M.explorer_focus_on_entry(explorer, path, entry_name)
 	return explorer
 end
 
-function M.explorer_compute_fs_actions(explorer)
+function M.compute_fs_actions(explorer)
 	-- Compute differences
 	local fs_diffs = {}
 	for _, v in pairs(explorer.views) do
@@ -477,9 +488,9 @@ function M.explorer_compute_fs_actions(explorer)
 	return { create = create, delete = vim.tbl_keys(delete_map), copy = copy, rename = rename, move = move }
 end
 
-function M.explorer_update_cursors(explorer)
+function M.update_cursors(explorer)
 	for _, win_id in ipairs(explorer.windows) do
-		if M.is_valid_win(win_id) then
+		if utils.is_valid_win(win_id) then
 			local buf_id = vim.api.nvim_win_get_buf(win_id)
 			local path = M.opened_buffers[buf_id].path
 			explorer.views[path].cursor = vim.api.nvim_win_get_cursor(win_id)
@@ -489,12 +500,12 @@ function M.explorer_update_cursors(explorer)
 	return explorer
 end
 
-function M.explorer_refresh_depth_window(explorer, depth, win_count, win_col, win_width, path)
+function M.refresh_depth_window(explorer, depth, win_count, win_col, win_width, path)
 	local views, windows, opts = explorer.views, explorer.windows, explorer.opts
 
 	local v = views[path] or {}
 	if path ~= "" then
-		v = M.view_ensure_proper(v, path, opts)
+		v = view.view_ensure_proper(v, path, opts)
 		views[path] = v
 	else
 		-- Create an empty buffer for empty paths
@@ -505,28 +516,28 @@ function M.explorer_refresh_depth_window(explorer, depth, win_count, win_col, wi
 
 	local config = {
 		col = win_col,
-		height = M.window_get_max_height(),
+		height = win.window_get_max_height(),
 		width = win_width,
-		title = win_count == 1 and M.fs_shorten_path(M.fs_full_path(path)) or M.fs_get_basename(path),
+		title = win_count == 1 and fs.shorten_path(fs.full_path(path)) or fs.get_basename(path),
 	}
 
 	local win_id = windows[win_count]
-	if not M.is_valid_win(win_id) then
-		M.window_close(win_id)
-		win_id = M.window_open(view.buf_id, config)
+	if not utils.is_valid_win(win_id) then
+		win.window_close(win_id)
+		win_id = win.window_open(v.buf_id, config)
 		windows[win_count] = win_id
 	end
 
-	M.window_update(win_id, config)
-	M.window_set_view(win_id, view)
+	win.window_update(win_id, config)
+	win.window_set_view(win_id, v)
 
-	M.trigger_event("MiniFilesWindowUpdate", { buf_id = vim.api.nvim_win_get_buf(win_id), win_id = win_id })
+	utils.trigger_event("MiniFilesWindowUpdate", { buf_id = vim.api.nvim_win_get_buf(win_id), win_id = win_id })
 
 	explorer.views = views
 	explorer.windows = windows
 end
 
-function M.explorer_get_path_depth(explorer, path)
+function M.get_path_depth(explorer, path)
 	for depth, depth_path in pairs(explorer.branch) do
 		if path == depth_path then
 			return depth
@@ -534,7 +545,7 @@ function M.explorer_get_path_depth(explorer, path)
 	end
 end
 
-function M.explorer_confirm_modified(explorer, action_name)
+function M.confirm_modified(explorer, action_name)
 	local has_modified = false
 	for _, v in pairs(explorer.views) do
 		if M.is_modified_buffer(v.buf_id) then
@@ -553,8 +564,8 @@ function M.explorer_confirm_modified(explorer, action_name)
 	return confirm_res == 1
 end
 
-function M.explorer_open_file(explorer, path)
-	explorer = M.explorer_ensure_target_window(explorer)
+function M.open_file(explorer, path)
+	explorer = M.ensure_target_window(explorer)
 
 	-- Try to use already created buffer, if present. This avoids not needed
 	-- `:edit` call and avoids some problems with auto-root from 'mini.misc'.
@@ -580,20 +591,20 @@ function M.explorer_open_file(explorer, path)
 	return explorer
 end
 
-function M.explorer_ensure_target_window(explorer)
-	if not M.is_valid_win(explorer.target_window) then
+function M.ensure_target_window(explorer)
+	if not utils.is_valid_win(explorer.target_window) then
 		explorer.target_window = M.get_first_valid_normal_window()
 	end
 	return explorer
 end
 
-function M.explorer_open_directory(explorer, path, target_depth)
+function M.open_directory(explorer, path, target_depth)
 	explorer.depth_focus = 2 -- Always keep focus on middle column
 	explorer.branch = { M.fs_get_parent(path) or "", path, "" }
 	return explorer
 end
 
-function M.explorer_open_root_parent(explorer)
+function M.open_root_parent(explorer)
 	local root = explorer.branch[1]
 	local root_parent = M.fs_get_parent(root)
 	if root_parent == nil then
@@ -604,17 +615,17 @@ function M.explorer_open_root_parent(explorer)
 	table.insert(explorer.branch, 1, root_parent)
 
 	-- Focus on previous root entry in its parent
-	return M.explorer_focus_on_entry(explorer, root_parent, M.fs_get_basename(root))
+	return M.focus_on_entry(explorer, root_parent, M.fs_get_basename(root))
 end
 
-function M.explorer_trim_branch_right(explorer)
+function M.trim_branch_right(explorer)
 	for i = explorer.depth_focus + 1, #explorer.branch do
 		explorer.branch[i] = nil
 	end
 	return explorer
 end
 
-function M.explorer_trim_branch_left(explorer)
+function M.trim_branch_left(explorer)
 	local new_branch = {}
 	for i = explorer.depth_focus, #explorer.branch do
 		table.insert(new_branch, explorer.branch[i])
@@ -695,7 +706,7 @@ function M.set_target_window(win_id)
 		utils.error("`win_id` should be valid window identifier.")
 	end
 
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -711,7 +722,7 @@ end
 ---
 ---@param opts table|nil Table of options to update.
 function M.refresh(opts)
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -722,7 +733,7 @@ function M.refresh(opts)
 
 	-- Confirm refresh if there is modified buffer
 	if force_update then
-		force_update = M.explorer_confirm_modified(explorer, "buffer updates")
+		force_update = M.confirm_modified(explorer, "buffer updates")
 	end
 
 	-- Respect explorer local options supplied inside its `open()` call but give
@@ -739,13 +750,13 @@ end
 --- - Update all directory buffers with the most relevant file system information.
 ---   Can be used without user edits to account for external file system changes.
 function M.synchronize()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
 
 	-- Parse and apply file system operations
-	local fs_actions = M.explorer_compute_fs_actions(explorer)
+	local fs_actions = M.compute_fs_actions(explorer)
 	if fs_actions ~= nil and fs.actions_confirm(fs_actions) then
 		fs.actions_apply(fs_actions, explorer.opts)
 	end
@@ -759,7 +770,7 @@ end
 ---   argument for |M.open()|).
 --- - Reset all tracked directory cursors to point at first entry.
 function M.reset()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -789,7 +800,7 @@ end
 ---     inside a file. Powers the `go_in_plus` mapping.
 ---     Default: `false`.
 function M.go_in(opts)
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -803,7 +814,7 @@ function M.go_in(opts)
 	end
 
 	local cur_line = vim.fn.line(".")
-	explorer = M.explorer_go_in_range(explorer, vim.api.nvim_get_current_buf(), cur_line, cur_line)
+	explorer = M.go_in_range(explorer, vim.api.nvim_get_current_buf(), cur_line, cur_line)
 
 	-- Always keep focus in the middle column
 	explorer.depth_focus = 2
@@ -823,7 +834,7 @@ end
 ---
 --- - Focus on window to the left showing parent of current directory.
 function M.go_out()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -863,12 +874,12 @@ end
 --- - Remove all branch paths to the left of currently focused one. This also
 ---   results into current window becoming the most left one.
 function M.trim_left()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
 
-	explorer = M.explorer_trim_branch_left(explorer)
+	explorer = M.trim_branch_left(explorer)
 	M.explorer_refresh(explorer)
 end
 
@@ -877,12 +888,12 @@ end
 --- - Remove all branch paths to the right of currently focused one. This also
 ---   results into current window becoming the most right one.
 function M.trim_right()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
 
-	explorer = M.explorer_trim_branch_right(explorer)
+	explorer = M.trim_branch_right(explorer)
 	M.explorer_refresh(explorer)
 end
 
@@ -891,7 +902,7 @@ end
 --- - Prepend branch with parent paths until current working directory is reached.
 ---   Do nothing if not inside it.
 function M.reveal_cwd()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -921,7 +932,7 @@ end
 --- - Open window with helpful information about currently shown explorer and
 ---   focus on it. To close it, press `q`.
 function M.show_help()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
@@ -939,12 +950,12 @@ end
 ---@return number|nil Window identifier inside which file will be opened or
 ---   `nil` if no explorer is opened.
 function M.get_target_window()
-	local explorer = M.explorer_get()
+	local explorer = M.get()
 	if explorer == nil then
 		return
 	end
 
-	explorer = M.explorer_ensure_target_window(explorer)
+	explorer = M.ensure_target_window(explorer)
 	return explorer.target_window
 end
 

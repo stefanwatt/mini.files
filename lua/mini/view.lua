@@ -1,17 +1,17 @@
-local buffer = require("lua.mini.buffer")
-local highlight = require("lua.mini.highlight")
-local utils     = require("lua.mini.utils")
-local M = {}
+local buffer    = require("mini.buffer")
+local highlight = require("mini.highlight")
+local utils     = require("mini.utils")
+local M         = {}
 
 function M.view_ensure_proper(view, path, opts)
 	-- Ensure proper buffer
-	if not M.is_valid_buf(view.buf_id) then
-		M.buffer_delete(view.buf_id)
-		view.buf_id = M.buffer_create(path, opts.mappings)
+	if not utils.is_valid_buf(view.buf_id) then
+		buffer.buffer_delete(view.buf_id)
+		view.buf_id = buffer.buffer_create(path, opts.mappings)
 		-- Make sure that pressing `u` in new buffer does nothing
 		local cache_undolevels = vim.bo[view.buf_id].undolevels
 		vim.bo[view.buf_id].undolevels = -1
-		view.children_path_ids = M.buffer_update(view.buf_id, path, opts)
+		view.children_path_ids = buffer.buffer_update(view.buf_id, path, opts)
 		vim.bo[view.buf_id].undolevels = cache_undolevels
 	end
 
@@ -116,8 +116,8 @@ function M.view_track_text_change(data)
 	M.opened_buffers[buf_id].n_modified = new_n_modified
 	local win_id = M.opened_buffers[buf_id].win_id
 	if new_n_modified > 0 and utils.is_valid_win(win_id) then
-    local buffer_opened = buffer.is_opened_buffer(buf_id)
-    local buffer_modified = buffer.is_modified_buffer(buf_id)
+		local buffer_opened = buffer.is_opened_buffer(buf_id)
+		local buffer_modified = buffer.is_modified_buffer(buf_id)
 		highlight.window_update_border_hl(win_id, buffer_opened, buffer_modified)
 	end
 

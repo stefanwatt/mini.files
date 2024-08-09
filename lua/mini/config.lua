@@ -94,6 +94,11 @@ function M.setup_config(config)
   return config
 end
 
-function M.apply_config(config) MiniFiles.config = config end
+function M.apply_config(config) M.config = config end
+
+--stylua: ignore
+function M.get_config(config)
+  return vim.tbl_deep_extend('force', M.config, vim.b.minifiles_config or {}, config or {})
+end
 
 return M

@@ -1,4 +1,3 @@
-
 -- TODO: where should this be located
 local function setup_keymaps(buf_id, mappings)
 	local go_in_visual = function()

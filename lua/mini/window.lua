@@ -1,6 +1,7 @@
-local highlight = require "lua.mini.highlight"
-local buffer    = require "lua.mini.buffer"
-local M = {}
+local highlight = require("mini.highlight")
+local buffer    = require("mini.buffer")
+local utils     = require("mini.utils")
+local M         = {}
 
 function M.window_open(buf_id, config)
   -- Add always the same extra data
@@ -38,7 +39,7 @@ function M.window_open(buf_id, config)
   highlight.window_update_highlight(win_id, 'CursorLine', 'MiniFilesCursorLine')
 
   -- Trigger dedicated event
-  M.trigger_event('MiniFilesWindowOpen', { buf_id = buf_id, win_id = win_id })
+  utils.trigger_event('MiniFilesWindowOpen', { buf_id = buf_id, win_id = win_id })
 
   return win_id
 end
@@ -84,7 +85,6 @@ function M.window_update(win_id, config)
   vim.wo[win_id].conceallevel = 3
 end
 
-
 function M.window_focus(win_id)
   vim.api.nvim_set_current_win(win_id)
   highlight.window_update_highlight(win_id, 'FloatTitle', 'MiniFilesTitleFocused')
@@ -103,7 +103,7 @@ function M.window_set_view(win_id, view)
   vim.api.nvim_win_set_buf(win_id, buf_id)
   -- - Update buffer register. No need to update previous buffer data, as it
   --   should already be invalidated.
-  M.opened_buffers[buf_id].win_id = win_id
+  buffer.opened_buffers[buf_id].win_id = win_id
 
   -- Set cursor
   pcall(M.window_set_cursor, win_id, view.cursor)
@@ -140,7 +140,6 @@ function M.window_tweak_cursor(win_id, buf_id)
 
   return cursor
 end
-
 
 function M.window_get_max_height()
   local has_tabline = vim.o.showtabline == 2 or (vim.o.showtabline == 1 and #vim.api.nvim_list_tabpages() > 1)

@@ -1,11 +1,8 @@
+local c = require("mini.config")
+
 local M = {}
 
 -- Namespaces
-
--- Timers
-M.timers = {
-  focus = vim.loop.new_timer(),
-}
 
 -- File system information
 M.is_windows = vim.loop.os_uname().sysname == 'Windows_NT'
@@ -14,38 +11,106 @@ M.is_windows = vim.loop.os_uname().sysname == 'Windows_NT'
 M.block_event_trigger = {}
 
 local augroup = vim.api.nvim_create_augroup('MiniFiles', {})
-local function au(event, pattern, callback, desc)
+function M.au(event, pattern, callback, desc)
   vim.api.nvim_create_autocmd(event, { group = augroup, pattern = pattern, callback = callback, desc = desc })
 end
 
-function M.create_autocommands(config)
-  au('VimResized', '*', MiniFiles.refresh, 'Refresh on resize')
 
-  if config.options.use_as_default_explorer then
-    -- Stop 'netrw' from showing. Needs `VimEnter` event autocommand if
-    -- this is called prior 'netrw' is set up
-    vim.cmd('silent! autocmd! FileExplorer *')
-    vim.cmd('autocmd VimEnter * ++once silent! autocmd! FileExplorer *')
+---@return boolean Always `true`.
+function M.default_filter(fs_entry)
+	return true
+end
+--- Default filter of file system entries
+---
+--- Currently does not filter anything out.
+---
+---@param fs_entry table Table with the following fields:
+--- __minifiles_fs_entry_data_fields
+---
 
-    au('BufEnter', '*', M.track_dir_edit, 'Track directory edit')
-  end
+--- Default prefix of file system entries
+---
+--- - If |MiniIcons| is set up, use |MiniIcons.get()| for "directory"/"file" category.
+--- - Otherwise:
+---     - For directory return fixed icon and "MiniFilesDirectory" group name.
+---     - For file try to use `get_icon()` from 'nvim-tree/nvim-web-devicons'.
+---       If missing, return fixed icon and 'MiniFilesFile' group name.
+---
+---@param fs_entry table Table with the following fields:
+--- __minifiles_fs_entry_data_fields
+---
+---@return ... Icon and highlight group name. For more details, see |M.config|
+---   and |MiniFiles-examples|.
+function M.default_prefix(fs_entry)
+	-- Prefer 'mini.icons'
+  -- TODO: get rid of global bs
+	if _G.MiniIcons ~= nil then
+		local category = fs_entry.fs_type == "directory" and "directory" or "file"
+		local icon, hl = _G.MiniIcons.get(category, fs_entry.path)
+		return icon .. " ", hl
+	end
+	-- Try falling back to 'nvim-web-devicons'
+	if fs_entry.fs_type == "directory" then
+		return " ", "MiniFilesDirectory"
+	end
+	local has_devicons, devicons = pcall(require, "nvim-web-devicons")
+	if not has_devicons then
+		return " ", "MiniFilesFile"
+	end
+
+	local icon, hl = devicons.get_icon(fs_entry.name, nil, { default = false })
+	return (icon or "") .. " ", hl or "MiniFilesFile"
 end
 
---stylua: ignore
-function M.get_config(config)
-  return vim.tbl_deep_extend('force', require("lua.mini.config").config, vim.b.minifiles_config or {}, config or {})
+--- Default sort of file system entries
+---
+--- Sort directories and files separately (alphabetically ignoring case) and
+--- put directories first.
+---
+---@param fs_entries table Array of file system entry data.
+---   Each one is a table with the following fields:
+--- __minifiles_fs_entry_data_fields
+---
+---@return table Sorted array of file system entries.
+function M.default_sort(fs_entries)
+	-- Sort ignoring case
+	local res = vim.tbl_map(function(x)
+		return {
+			fs_type = x.fs_type,
+			name = x.name,
+			path = x.path,
+			lower_name = x.name:lower(),
+			is_dir = x.fs_type == "directory",
+		}
+	end, fs_entries)
+
+	-- Sort based on default order
+	table.sort(res, M.compare_fs_entries)
+
+	return vim.tbl_map(function(x)
+		return { name = x.name, fs_type = x.fs_type, path = x.path }
+	end, res)
+end
+
+function M.compare_fs_entries(a, b)
+  -- Put directory first
+  if a.is_dir and not b.is_dir then return true end
+  if not a.is_dir and b.is_dir then return false end
+
+  -- Otherwise order alphabetically ignoring case
+  return a.lower_name < b.lower_name
 end
 
 function M.normalize_opts(explorer_opts, opts)
-  opts = vim.tbl_deep_extend('force', M.get_config(), explorer_opts or {}, opts or {})
-  opts.content.filter = opts.content.filter or MiniFiles.default_filter
-  opts.content.prefix = opts.content.prefix or MiniFiles.default_prefix
-  opts.content.sort = opts.content.sort or MiniFiles.default_sort
-
+  opts = vim.tbl_deep_extend('force', c.get_config(), explorer_opts or {}, opts or {})
+  opts.content.filter = opts.content.filter or M.default_filter
+  opts.content.prefix = opts.content.prefix or M.default_prefix
+  opts.content.sort = opts.content.sort or M.default_sort
   return opts
 end
 
 -- Autocommands ---------------------------------------------------------------
+--- @return string | nil
 function M.track_dir_edit(data)
   -- Make early returns
   if vim.api.nvim_get_current_buf() ~= data.buf then return end
@@ -65,12 +130,8 @@ function M.track_dir_edit(data)
   vim.b.minifiles_processed_dir = true
 
   -- Open directory without history
-  vim.schedule(function() MiniFiles.open(path, false) end)
+  return path
 end
-
-M.timers = {
-  focus = vim.loop.new_timer(),
-}
 
 function M.match_line_entry_name(l)
   if l == nil then return nil end
@@ -122,8 +183,6 @@ function M.set_buflines(buf_id, lines)
     string.format('lockmarks lua vim.api.nvim_buf_set_lines(%d, 0, -1, false, %s)', buf_id, vim.inspect(lines))
   vim.cmd(cmd)
 end
-
-function M.set_extmark(...) pcall(vim.api.nvim_buf_set_extmark, ...) end
 
 function M.get_first_valid_normal_window()
   for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(0)) do

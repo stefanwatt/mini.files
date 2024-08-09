@@ -1,4 +1,4 @@
-local utils = require("lua.mini.utils")
+local utils = require("mini.utils")
 local M = {}
 
 M.ns_id = {
@@ -50,6 +50,8 @@ function M.window_update_border_hl(win_id, buffer_opened, buffer_modified)
 		M.window_update_highlight(win_id, "FloatBorder", border_hl)
 	end
 end
+
+function M.set_extmark(...) pcall(vim.api.nvim_buf_set_extmark, ...) end
 
 ---@param buf_id number
 ---@param lines string[]

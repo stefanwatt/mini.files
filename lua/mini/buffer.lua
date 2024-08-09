@@ -1,6 +1,6 @@
-local highlight = require("lua.mini.highlight")
-local utils = require("lua.mini.utils")
-local fs = require("lua.mini.fs")
+local highlight = require("mini.highlight")
+local utils = require("mini.utils")
+local fs = require("mini.fs")
 local M = {}
 
 -- Register of opened buffer data for quick access. Tables per buffer id:
@@ -20,7 +20,7 @@ function M.buffer_create(path, mappings)
 	M.opened_buffers[buf_id] = { path = path }
 
 	-- Make buffer mappings
-	M.buffer_make_mappings(buf_id, mappings)
+	-- M.buffer_make_mappings(buf_id, mappings)
 
 	-- Make buffer autocommands
 	local augroup = vim.api.nvim_create_augroup("MiniFiles", { clear = false })
@@ -28,9 +28,10 @@ function M.buffer_create(path, mappings)
 		vim.api.nvim_create_autocmd(events, { group = augroup, buffer = buf_id, desc = desc, callback = callback })
 	end
 
-	au({ "CursorMoved", "CursorMovedI" }, "Tweak cursor position", M.view_track_cursor)
-	au({ "TextChanged", "TextChangedI", "TextChangedP" }, "Track buffer modification", M.view_track_text_change)
-
+	-- TODO: circular dependency buffer <-> view
+	-- au({ "CursorMoved", "CursorMovedI" }, "Tweak cursor position", M.view_track_cursor)
+	-- au({ "TextChanged", "TextChangedI", "TextChangedP" }, "Track buffer modification", M.view_track_text_change)
+	--
 	-- Tweak buffer to be used nicely with other 'mini.nvim' modules
 	vim.b[buf_id].minicursorword_disable = true
 
@@ -44,7 +45,7 @@ function M.buffer_create(path, mappings)
 end
 
 function M.buffer_update(buf_id, path, opts)
-	if not (M.is_valid_buf(buf_id) and fs.does_path_exist(path)) then
+	if not (utils.is_valid_buf(buf_id) and fs.does_path_exist(path)) then
 		return
 	end
 
@@ -72,20 +73,20 @@ function M.buffer_update_directory(buf_id, path, opts)
 	local fs_entries = fs.read_dir(path, opts.content)
 
 	-- - Compute format expression resulting into same width path ids
-	local path_width = math.floor(math.log10(#M.path_index)) + 1
+	local path_width = math.floor(math.log10(#fs.path_index)) + 1
 	local line_format = "/%0" .. path_width .. "d/%s/%s"
 
 	local prefix_fun = opts.content.prefix
 	for _, entry in ipairs(fs_entries) do
 		local prefix, hl = prefix_fun(entry)
 		prefix, hl = prefix or "", hl or ""
-		table.insert(lines, string.format(line_format, M.path_index[entry.path], prefix, entry.name))
+		table.insert(lines, string.format(line_format, fs.path_index[entry.path], prefix, entry.name))
 		table.insert(icon_hl, hl)
 		table.insert(name_hl, entry.fs_type == "directory" and "MiniFilesDirectory" or "MiniFilesFile")
 	end
 
 	-- Set lines
-	M.set_buflines(buf_id, lines)
+	utils.set_buflines(buf_id, lines)
 	highlight.add_highlights(buf_id, lines, icon_hl, name_hl)
 
 	return fs_entries
