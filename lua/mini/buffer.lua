@@ -13,8 +13,11 @@ local M = {}
 M.opened_buffers = {}
 
 ---@param path string
+---@param mappings string[]
 ---@param setup_keymaps function(number,string[])
-function M.buffer_create(path, mappings, setup_keymaps)
+---@param track_cursor function(data)
+---@param track_text_change function(data)
+function M.buffer_create(path, mappings, setup_keymaps, track_cursor, track_text_change)
 	-- Create buffer
 	local buf_id = vim.api.nvim_create_buf(false, true)
 
@@ -29,9 +32,8 @@ function M.buffer_create(path, mappings, setup_keymaps)
 		vim.api.nvim_create_autocmd(events, { group = augroup, buffer = buf_id, desc = desc, callback = callback })
 	end
 
-	-- TODO: circular dependency buffer <-> view
-	-- au({ "CursorMoved", "CursorMovedI" }, "Tweak cursor position", M.view_track_cursor)
-	-- au({ "TextChanged", "TextChangedI", "TextChangedP" }, "Track buffer modification", M.view_track_text_change)
+	au({ "CursorMoved", "CursorMovedI" }, "Tweak cursor position", track_cursor)
+	au({ "TextChanged", "TextChangedI", "TextChangedP" }, "Track buffer modification", track_text_change)
 	--
 	-- Tweak buffer to be used nicely with other 'mini.nvim' modules
 	vim.b[buf_id].minicursorword_disable = true
@@ -152,11 +154,11 @@ function M.compute_fs_diff(buf_id, ref_path_ids)
 
 	-- Process present file system entries
 	for _, l in ipairs(lines) do
-		local path_id = M.match_line_path_id(l)
-		local path_from = M.path_index[path_id]
+		local path_id = utils.match_line_path_id(l)
+		local path_from = fs.path_index[path_id]
 
 		-- Use whole line as name if no path id is detected
-		local name_to = path_id ~= nil and l:sub(M.match_line_offset(l)) or l
+		local name_to = path_id ~= nil and l:sub(utils.match_line_offset(l)) or l
 
 		-- Preserve trailing '/' to distinguish between creating file or directory
 		local path_to = fs.child_path(path, name_to) .. (vim.endswith(name_to, "/") and "/" or "")
@@ -172,7 +174,7 @@ function M.compute_fs_diff(buf_id, ref_path_ids)
 	-- Detect missing file system entries
 	for _, ref_id in ipairs(ref_path_ids) do
 		if not present_path_ids[ref_id] then
-			table.insert(res, { from = M.path_index[ref_id], to = nil })
+			table.insert(res, { from = fs.path_index[ref_id], to = nil })
 		end
 	end
 

@@ -14,7 +14,7 @@ M.map = function(mode, lhs, rhs, opts)
 end
 
 ---@param buf_id number
----@param mappings string[]
+---@param mappings table
 local function setup_keymaps(buf_id, mappings)
 	local go_in_visual = function()
 		-- React only on linewise mode, as others can be used for editing
@@ -26,8 +26,8 @@ local function setup_keymaps(buf_id, mappings)
 		local line_1, line_2 = vim.fn.line("v"), vim.fn.line(".")
 		local from_line, to_line = math.min(line_1, line_2), math.max(line_1, line_2)
 		vim.schedule(function()
-			local explorer = M.explorer_get()
-			explorer = M.explorer_go_in_range(explorer, buf_id, from_line, to_line)
+			local explorer = M.get()
+			explorer = M.go_in_range(explorer, buf_id, from_line, to_line)
 			M.explorer_refresh(explorer)
 		end)
 
@@ -216,7 +216,7 @@ function M.close()
 
 	-- Invalidate views
 	for path, v in pairs(explorer.views) do
-		explorer.views[path] = view.view_invalidate_buffer(view.encode_cursor(v))
+		explorer.views[path] = view.invalidate_buffer(view.encode_cursor(v))
 	end
 
 	-- Update histories and unmark as opened
@@ -295,9 +295,7 @@ function M.explorer_refresh(explorer, opts)
 
 	for _, win_id in ipairs(explorer.windows) do
 		local buf_id = vim.api.nvim_win_get_buf(win_id)
-		-- TODO: i think i need to require this everytime
-		-- and i got tons of stuff like this everywhere
-		buffer.opened_buffers[buf_id].win_id = nil
+		require("mini.buffer").opened_buffers[buf_id].win_id = nil
 	end
 
 	-- Always show three columns
@@ -334,7 +332,7 @@ function M.refresh_preview_window(explorer, win_count, win_col, win_width, previ
 	local views, windows, opts = explorer.views, explorer.windows, explorer.opts
 
 	local v = views[preview_path] or {}
-	v = view.view_ensure_proper(v, preview_path, opts, setup_keymaps)
+	v = view.ensure_proper(v, preview_path, explorer, setup_keymaps)
 	views[preview_path] = v
 
 	local config = {
@@ -432,7 +430,7 @@ function M.explorer_sync_cursor_and_branch(explorer, depth)
 	-- Compute if path at cursor and path to the right are equal (in sync)
 	local cursor_path
 	if type(cursor) == "table" and utils.is_valid_buf(buf_id) then
-		local l = M.get_bufline(buf_id, cursor[1])
+		local l = utils.get_bufline(buf_id, cursor[1])
 		cursor_path = fs.path_index[utils.match_line_path_id(l)]
 	elseif type(cursor) == "string" then
 		cursor_path = fs.child_path(path, cursor)
@@ -545,7 +543,7 @@ function M.update_cursors(explorer)
 	for _, win_id in ipairs(explorer.windows) do
 		if utils.is_valid_win(win_id) then
 			local buf_id = vim.api.nvim_win_get_buf(win_id)
-			local path = buffer.opened_buffers[buf_id].path
+			local path = require("mini.buffer").opened_buffers[buf_id].path
 			explorer.views[path].cursor = vim.api.nvim_win_get_cursor(win_id)
 		end
 	end
@@ -558,13 +556,13 @@ function M.refresh_depth_window(explorer, depth, win_count, win_col, win_width, 
 
 	local v = views[path] or {}
 	if path ~= "" then
-		v = view.view_ensure_proper(v, path, opts, setup_keymaps)
+		v = view.ensure_proper(v, path, explorer, setup_keymaps)
 		views[path] = v
 	else
 		-- Create an empty buffer for empty paths
 		local buf_id = vim.api.nvim_create_buf(false, true)
 		v.buf_id = buf_id
-		M.opened_buffers[buf_id] = { path = "", n_modified = 0 }
+		require("mini.buffer").opened_buffers[buf_id] = { path = "", n_modified = 0 }
 	end
 
 	local config = {
@@ -624,7 +622,7 @@ function M.open_file(explorer, path)
 	-- `:edit` call and avoids some problems with auto-root from 'mini.misc'.
 	local path_buf_id
 	for _, buf_id in ipairs(vim.api.nvim_list_bufs()) do
-		local is_target = M.is_valid_buf(buf_id)
+		local is_target = utils.is_valid_buf(buf_id)
 			and vim.bo[buf_id].buflisted
 			and vim.api.nvim_buf_get_name(buf_id) == path
 		if is_target then
@@ -913,7 +911,7 @@ function M.go_out()
 	-- Make sure the views are properly initialized for all paths in the branch
 	for i, path in ipairs(explorer.branch) do
 		if path ~= "" and not explorer.views[path] then
-			explorer.views[path] = view.view_ensure_proper({}, path, explorer.opts, setup_keymaps)
+			explorer.views[path] = view.ensure_proper({}, path, explorer, setup_keymaps)
 		end
 	end
 

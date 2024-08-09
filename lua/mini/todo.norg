@@ -1,0 +1,9 @@
+* TODO
+** Functionality
+
+  - (x) view_track_cursor without circ dependency
+  - (x) = does does something, but the file is not stored on disk
+  - ( ) right column has some cut off chars
+** Chores
+  - ( ) lets see if we can get rid of this nonsense opts object on explorer
+  - ( ) add annotations everywhere

@@ -105,7 +105,7 @@ end
 -- File system actions --------------------------------------------------------
 -- TODO: find better name
 function M.actions_confirm(fs_actions)
-  if not require("lua.mini.config").config.options.confirm_fs_actions then
+  if not require("mini.config").config.options.confirm_fs_actions then
 		return true
 	end
   local msg = table.concat(M.actions_to_lines(fs_actions), '\n')

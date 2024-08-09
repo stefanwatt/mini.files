@@ -103,7 +103,7 @@ function M.window_set_view(win_id, view)
   vim.api.nvim_win_set_buf(win_id, buf_id)
   -- - Update buffer register. No need to update previous buffer data, as it
   --   should already be invalidated.
-  buffer.opened_buffers[buf_id].win_id = win_id
+  require("mini.buffer").opened_buffers[buf_id].win_id = win_id
 
   -- Set cursor
   pcall(M.window_set_cursor, win_id, view.cursor)
@@ -128,9 +128,9 @@ end
 
 function M.tweak_cursor(win_id, buf_id)
   local cursor = vim.api.nvim_win_get_cursor(win_id)
-  local l = M.get_bufline(buf_id, cursor[1])
+  local l = utils.get_bufline(buf_id, cursor[1])
 
-  local cur_offset = M.match_line_offset(l)
+  local cur_offset = utils.match_line_offset(l)
   if cursor[2] < (cur_offset - 1) then
     cursor[2] = cur_offset - 1
     vim.api.nvim_win_set_cursor(win_id, cursor)

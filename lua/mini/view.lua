@@ -4,22 +4,25 @@ local highlight = require("mini.highlight")
 local utils     = require("mini.utils")
 local M         = {}
 
-function M.view_ensure_proper(view, path, opts, setup_keymaps)
+function M.ensure_proper(view, path, explorer, setup_keymaps)
 	-- Ensure proper buffer
 	if not utils.is_valid_buf(view.buf_id) then
 		buffer.buffer_delete(view.buf_id)
-		view.buf_id = buffer.buffer_create(path, opts.mappings, setup_keymaps)
+		local function track_cursor(data)
+			M.track_cursor(data,explorer)
+		end
+		view.buf_id = buffer.buffer_create(path, explorer.opts.mappings, setup_keymaps, track_cursor, M.track_text_change)
 		-- Make sure that pressing `u` in new buffer does nothing
 		local cache_undolevels = vim.bo[view.buf_id].undolevels
 		vim.bo[view.buf_id].undolevels = -1
-		view.children_path_ids = buffer.buffer_update(view.buf_id, path, opts)
+		view.children_path_ids = buffer.buffer_update(view.buf_id, path, explorer.opts)
 		vim.bo[view.buf_id].undolevels = cache_undolevels
 	end
 
 	-- Ensure proper cursor. If string, find it as line in current buffer.
 	view.cursor = view.cursor or { 1, 0 }
 	if type(view.cursor) == "string" then
-		view = M.view_decode_cursor(view)
+		view = M.decode_cursor(view)
 	end
 
 	return view
@@ -39,7 +42,7 @@ function M.encode_cursor(view)
 	return view
 end
 
-function M.view_decode_cursor(view)
+function M.decode_cursor(view)
 	local buf_id, cursor = view.buf_id, view.cursor
 	if not utils.is_valid_buf(buf_id) or type(cursor) ~= "string" then
 		return view
@@ -60,17 +63,17 @@ function M.view_decode_cursor(view)
 	return view
 end
 
-function M.view_invalidate_buffer(view)
+function M.invalidate_buffer(view)
 	buffer.buffer_delete(view.buf_id)
 	view.buf_id = nil
 	view.children_path_ids = nil
 	return view
 end
 
-M.view_track_cursor = vim.schedule_wrap(function(data)
+M.track_cursor = vim.schedule_wrap(function(explorer, data)
 	-- Schedule this in order to react *after* all pending changes are applied
 	local buf_id = data.buf
-	local buf_data = M.opened_buffers[buf_id]
+	local buf_data = require("mini.buffer").opened_buffers[buf_id]
 	if buf_data == nil then
 		return
 	end
@@ -85,12 +88,13 @@ M.view_track_cursor = vim.schedule_wrap(function(data)
 
 	-- Ensure cursor line doesn't contradict window on the right
 	local tabpage_id = vim.api.nvim_win_get_tabpage(win_id)
-	local explorer = M.explorer_get(tabpage_id)
+	-- TODO: i hope the one from refresh_depth_window is the correct one
+	-- local explorer = M.explorer_get(tabpage_id)
 	if explorer == nil then
 		return
 	end
 
-	local buf_depth = M.explorer_get_path_depth(explorer, buf_data.path)
+	local buf_depth = M.get_path_depth(explorer, buf_data.path)
 	if buf_depth == nil then
 		return
 	end
@@ -110,12 +114,20 @@ M.view_track_cursor = vim.schedule_wrap(function(data)
 	M.block_event_trigger["MiniFilesWindowUpdate"] = false
 end)
 
-function M.view_track_text_change(data)
+function M.get_path_depth(explorer, path)
+	for depth, depth_path in pairs(explorer.branch) do
+		if path == depth_path then
+			return depth
+		end
+	end
+end
+function M.track_text_change(data)
 	-- Track 'modified'
 	local buf_id = data.buf
-	local new_n_modified = M.opened_buffers[buf_id].n_modified + 1
-	M.opened_buffers[buf_id].n_modified = new_n_modified
-	local win_id = M.opened_buffers[buf_id].win_id
+	local opened_buffers = require("mini.buffer").opened_buffers
+	local new_n_modified = opened_buffers[buf_id].n_modified + 1
+	opened_buffers[buf_id].n_modified = new_n_modified
+	local win_id = opened_buffers[buf_id].win_id
 	if new_n_modified > 0 and utils.is_valid_win(win_id) then
 		local buffer_opened = buffer.is_opened_buffer(buf_id)
 		local buffer_modified = buffer.is_modified_buffer(buf_id)
@@ -129,7 +141,7 @@ function M.view_track_text_change(data)
 
 	local n_lines = vim.api.nvim_buf_line_count(buf_id)
 	-- local height = math.min(n_lines, H.window_get_max_height())
-	local height = M.window_get_max_height()
+	local height = win.window_get_max_height()
 	vim.api.nvim_win_set_height(win_id, height)
 
 	-- Ensure that only buffer lines are shown. This can be not the case if after
