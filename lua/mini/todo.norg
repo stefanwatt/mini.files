@@ -6,7 +6,7 @@
   - ( ) right column has some cut off chars
   - ( ) cursor is always shifted left one if its at the end of the line
   - ( ) preview is not updating 
-   - ( ) path id is missing
+  - ( ) path id is missing
 ** Chores
   - ( ) lets see if we can get rid of this nonsense opts object on explorer
   - ( ) add annotations everywhere

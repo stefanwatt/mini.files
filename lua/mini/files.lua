@@ -34,7 +34,7 @@ function M.setup(user_config)
 	config.apply_config(user_config)
 
 	-- Define behavior
-	utils.au("VimResized", "*", explorer.refresh, "Refresh on resize")
+	utils.au("VimResized", "*", explorer.resize, "Refresh on resize")
 
 	if user_config.options.use_as_default_explorer then
 		-- Stop 'netrw' from showing. Needs `VimEnter` event autocommand if

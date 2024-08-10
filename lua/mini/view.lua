@@ -4,8 +4,8 @@ local highlight = require("mini.highlight")
 local utils     = require("mini.utils")
 local M         = {}
 
----@alias RefreshExplorerFun fun(explorer: MiniFilesExplorer, opts: MiniFilesExplorerOpts)
----@alias SyncCursorFun fun(explorer: MiniFilesExplorer, depth: number)
+---@alias RefreshExplorerFun fun(explorer: Explorer, opts: ExplorerOpts)
+---@alias SyncCursorFun fun(explorer: Explorer, depth: number)
 
 ---@class MiniFilesViewEventListeners 
  ---@field refresh_explorer RefreshExplorerFun
@@ -18,20 +18,18 @@ function M.add_event_listener(event, callback)
 	M.event_listeners[event] = callback
 end
 
-function M.ensure_proper(view, path, explorer, setup_keymaps)
+function M.ensure_proper(view, path, explorer)
 	-- Ensure proper buffer
 	if not utils.is_valid_buf(view.buf_id) then
 		buffer.buffer_delete(view.buf_id)
 		local function track_cursor(data)
 			M.track_cursor(explorer,data)
 		end
-		view.buf_id = buffer.buffer_create(path, explorer.opts.mappings, setup_keymaps, track_cursor, M.track_text_change)
+		buffer.add_event_listener('track_cursor', track_cursor)
+		view.buf_id = buffer.buffer_create(path)
 		-- Make sure that pressing `u` in new buffer does nothing
 		local cache_undolevels = vim.bo[view.buf_id].undolevels
 		vim.bo[view.buf_id].undolevels = -1
-		if not view then print("[ensure proper] no view")end
-		if not explorer then print("[ensure proper] no explorer")end
-		if not explorer.opts then print("[ensure proper] no explorer opts")end
 		view.children_path_ids = buffer.buffer_update(view.buf_id, path, explorer.opts)
 		vim.bo[view.buf_id].undolevels = cache_undolevels
 	end
@@ -87,6 +85,8 @@ function M.invalidate_buffer(view)
 	return view
 end
 
+---@param explorer Explorer
+---@param data CursorChangedData
 M.track_cursor = vim.schedule_wrap(function(explorer, data)
 	-- Schedule this in order to react *after* all pending changes are applied
 	local buf_id = data.buf
@@ -111,7 +111,7 @@ M.track_cursor = vim.schedule_wrap(function(explorer, data)
 		return
 	end
 
-	local buf_depth = utils.get_path_depth(explorer, buf_data.path)
+	local buf_depth = utils.get_path_depth(explorer.branch, buf_data.path)
 	if buf_depth == nil then
 		return
 	end
@@ -127,12 +127,13 @@ M.track_cursor = vim.schedule_wrap(function(explorer, data)
 
 	-- Don't trigger redundant window update events
 	require("mini.utils").block_event_trigger["MiniFilesWindowUpdate"] = true
-	-- M.explorer_refresh(explorer)
 	M.event_listeners["refresh_explorer"](explorer, explorer.opts)
 	require("mini.utils").block_event_trigger["MiniFilesWindowUpdate"] = false
 end)
 
 
+
+---@param data TextChangedData
 function M.track_text_change(data)
 	-- Track 'modified'
 	local buf_id = data.buf

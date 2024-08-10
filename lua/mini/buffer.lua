@@ -12,12 +12,26 @@ local M = {}
 --   initial `buf_set_lines` (`noautocmd` doesn't quick work for this event).
 M.opened_buffers = {}
 
+---@alias SetupKeymapsFun fun(buf_id: number, mappings: MiniFilesKeymaps)
+---@alias TrackCursorFun fun(explorer: Explorer, data: CursorChangedData)
+---@alias TrackTextChangeFun fun(data: TextChangedData)
+
+---@class MiniFilesBufferEventListeners 
+---@field setup_keymaps SetupKeymapsFun
+---@field track_cursor TrackCursorFun
+---@field track_text_change TrackTextChangeFun
+M.event_listeners = {}
+
+
+
+---@param event "setup_keymaps" | "track_cursor" | "track_text_change"
+---@param callback SetupKeymapsFun | TrackCursorFun | TrackTextChangeFun
+function M.add_event_listener(event, callback)
+	M.event_listeners[event] = callback
+end
+
 ---@param path string
----@param mappings string[]
----@param setup_keymaps function(number,string[])
----@param track_cursor function(data)
----@param track_text_change function(data)
-function M.buffer_create(path, mappings, setup_keymaps, track_cursor, track_text_change)
+function M.buffer_create(path)
 	-- Create buffer
 	local buf_id = vim.api.nvim_create_buf(false, true)
 
@@ -25,15 +39,15 @@ function M.buffer_create(path, mappings, setup_keymaps, track_cursor, track_text
 	M.opened_buffers[buf_id] = { path = path }
 
 
-	setup_keymaps(buf_id, mappings)
+	M.event_listeners.setup_keymaps(buf_id, require("mini.config").get_config().mappings)
 	-- Make buffer autocommands
 	local augroup = vim.api.nvim_create_augroup("MiniFiles", { clear = false })
 	local au = function(events, desc, callback)
 		vim.api.nvim_create_autocmd(events, { group = augroup, buffer = buf_id, desc = desc, callback = callback })
 	end
 
-	au({ "CursorMoved", "CursorMovedI" }, "Tweak cursor position", track_cursor)
-	au({ "TextChanged", "TextChangedI", "TextChangedP" }, "Track buffer modification", track_text_change)
+	au({ "CursorMoved", "CursorMovedI" }, "Tweak cursor position", M.event_listeners.track_cursor)
+	au({ "TextChanged", "TextChangedI", "TextChangedP" }, "Track buffer modification", M.event_listeners.track_text_change)
 	--
 	-- Tweak buffer to be used nicely with other 'mini.nvim' modules
 	vim.b[buf_id].minicursorword_disable = true

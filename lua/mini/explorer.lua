@@ -6,15 +6,29 @@ local win = require("mini.window")
 local fs = require("mini.fs")
 local M = {}
 
+---@class MiniFilesKeymaps
+---@field close string
+---@field go_in string
+---@field go_in_plus string
+---@field go_out string
+---@field go_out_plus string
+---@field reset string
+---@field reveal_cwd string
+---@field show_help string
+---@field synchronize string
+---@field trim_left string
+---@field trim_right string
 
 M.map = function(mode, lhs, rhs, opts)
-  if lhs == '' then return end
-  opts = vim.tbl_deep_extend('force', { silent = true }, opts or {})
-  vim.keymap.set(mode, lhs, rhs, opts)
+	if lhs == "" then
+		return
+	end
+	opts = vim.tbl_deep_extend("force", { silent = true }, opts or {})
+	vim.keymap.set(mode, lhs, rhs, opts)
 end
 
 ---@param buf_id number
----@param mappings table
+---@param mappings MiniFilesKeymaps
 local function setup_keymaps(buf_id, mappings)
 	local go_in_visual = function()
 		-- React only on linewise mode, as others can be used for editing
@@ -28,7 +42,7 @@ local function setup_keymaps(buf_id, mappings)
 		vim.schedule(function()
 			local explorer = M.get()
 			explorer = M.go_in_range(explorer, buf_id, from_line, to_line)
-			M.explorer_refresh(explorer)
+			M.refresh(explorer)
 		end)
 
 		-- Go to Normal mode. '\28\14' is an escaped version of `<C-\><C-n>`.
@@ -57,18 +71,23 @@ local function setup_keymaps(buf_id, mappings)
 	--stylua: ignore end
 end
 
+buffer.add_event_listener("setup_keymaps", setup_keymaps)
+buffer.add_event_listener("track_text_change", view.track_text_change)
+
 -- History of explorers per root directory
-M.explorer_path_history = {}
+M.path_history = {}
 
 -- Register of opened explorers per tabpage
 M.opened_explorers = {}
 
-
 -- Explorers ------------------------------------------------------------------
----@class MiniFilesExplorerOpts
+---@class ExplorerBranch
 ---TODO: define
 --
----@class MiniFilesExplorer
+---@class ExplorerOpts
+---TODO: define
+--
+---@class Explorer
 ---
 ---@field branch table Array of absolute directory paths from parent to child.
 ---   Its ids are called depth.
@@ -144,7 +163,7 @@ function M.open(path, use_latest, opts)
 	-- Get explorer to open
 	local explorer
 	if use_latest then
-		explorer = M.explorer_path_history[path]
+		explorer = M.path_history[path]
 	end
 	explorer = explorer or M.new(path)
 
@@ -163,17 +182,16 @@ function M.open(path, use_latest, opts)
 	explorer.depth_focus = 2 -- Always focus on the middle column
 
 	-- Refresh and register as opened
-	M.explorer_refresh(explorer)
+	M.refresh(explorer)
 
 	-- Register latest used path
 	fs.latest_paths[vim.api.nvim_get_current_tabpage()] = path
 
 	-- Track lost focus
-	M.explorer_track_lost_focus()
+	M.track_lost_focus()
 	M.update_preview(explorer)
-	view.add_event_listener("refresh_explorer", M.explorer_refresh)
-	view.add_event_listener("sync_cursor", M.explorer_sync_cursor_and_branch)
-
+	view.add_event_listener("refresh_explorer", M.refresh)
+	view.add_event_listener("sync_cursor", M.sync_cursor_and_branch)
 	-- Trigger appropriate event
 	utils.trigger_event("MiniFilesExplorerOpen")
 end
@@ -227,7 +245,7 @@ function M.close()
 
 	-- Update histories and unmark as opened
 	local tabpage_id, anchor = vim.api.nvim_get_current_tabpage(), explorer.anchor
-	M.explorer_path_history[anchor] = explorer
+	M.path_history[anchor] = explorer
 	M.opened_explorers[tabpage_id] = nil
 
 	-- Return `true` indicating success in closing
@@ -265,8 +283,8 @@ function M.update_preview(explorer)
 	local middle_path = explorer.branch[2]
 	local cursor = vim.api.nvim_win_get_cursor(middle_win)
 
-  local validated_buf_id = buffer.validate_opened_buffer(middle_buf)
-  local validated_line = buffer.validate_line(validated_buf_id, cursor[1])
+	local validated_buf_id = buffer.validate_opened_buffer(middle_buf)
+	local validated_line = buffer.validate_line(validated_buf_id, cursor[1])
 	local fs_entry = fs.get_fs_entry(validated_buf_id, validated_line)
 
 	if fs_entry then
@@ -275,8 +293,8 @@ function M.update_preview(explorer)
 	end
 end
 
-function M.explorer_refresh(explorer, opts)
-	explorer = M.explorer_normalize(explorer)
+function M.refresh(explorer, opts)
+	explorer = M.normalize(explorer)
 	if explorer.is_corrupted then
 		explorer.is_corrupted = false
 		M.close()
@@ -340,7 +358,7 @@ function M.refresh_preview_window(explorer, win_count, win_col, win_width, previ
 	local views, windows, opts = explorer.views, explorer.windows, explorer.opts
 
 	local v = views[preview_path] or {}
-	v = view.ensure_proper(v, preview_path, explorer, setup_keymaps)
+	v = view.ensure_proper(v, preview_path, explorer)
 	views[preview_path] = v
 
 	local config = {
@@ -367,10 +385,10 @@ function M.refresh_preview_window(explorer, win_count, win_col, win_width, previ
 end
 
 M.timers = {
-  focus = vim.loop.new_timer(),
+	focus = vim.loop.new_timer(),
 }
 
-function M.explorer_track_lost_focus()
+function M.track_lost_focus()
 	local track = vim.schedule_wrap(function()
 		local explorer = M.get()
 		if explorer == nil then
@@ -387,7 +405,7 @@ function M.explorer_track_lost_focus()
 	M.timers.focus:start(1000, 1000, track)
 end
 
-function M.explorer_normalize(explorer)
+function M.normalize(explorer)
 	-- Ensure that all paths from branch are valid present paths
 	local norm_branch = {}
 	for _, path in ipairs(explorer.branch) do
@@ -418,7 +436,7 @@ function M.explorer_normalize(explorer)
 	return explorer
 end
 
-function M.explorer_sync_cursor_and_branch(explorer, depth)
+function M.sync_cursor_and_branch(explorer, depth)
 	-- Compute helper data while making early returns
 	if #explorer.branch < depth then
 		return explorer
@@ -468,8 +486,8 @@ function M.explorer_sync_cursor_and_branch(explorer, depth)
 end
 
 function M.go_in_range(explorer, buf_id, from_line, to_line)
-  local validated_buf_id = buffer.validate_opened_buffer(buf_id)
-  local validated_line = buffer.validate_line(validated_buf_id, from_line)
+	local validated_buf_id = buffer.validate_opened_buffer(buf_id)
+	local validated_line = buffer.validate_line(validated_buf_id, from_line)
 	local fs_entry = fs.get_fs_entry(validated_buf_id, validated_line)
 	if fs_entry and fs_entry.fs_type == "directory" then
 		explorer = M.open_directory(explorer, fs_entry.path, explorer.depth_focus + 1)
@@ -485,7 +503,7 @@ function M.focus_on_entry(explorer, path, entry_name)
 	end
 
 	-- Set focus on directory. Reset if it is not in current branch.
-	explorer.depth_focus = utils.get_path_depth(explorer, path)
+	explorer.depth_focus = utils.get_path_depth(explorer.branch, path)
 	if explorer.depth_focus == nil then
 		explorer.branch, explorer.depth_focus = { path }, 1
 	end
@@ -564,7 +582,7 @@ function M.refresh_depth_window(explorer, depth, win_count, win_col, win_width, 
 
 	local v = views[path] or {}
 	if path ~= "" then
-		v = view.ensure_proper(v, path, explorer, setup_keymaps)
+		v = view.ensure_proper(v, path, explorer)
 		views[path] = v
 	else
 		-- Create an empty buffer for empty paths
@@ -686,9 +704,23 @@ function M.trim_branch_left(explorer)
 	return explorer
 end
 
-function M.explorer_show_help(explorer_buf_id, explorer_win_id)
+--- Show help window
+---
+--- - Open window with helpful information about currently shown explorer and
+---   focus on it. To close it, press `q`.
+function M.show_help()
+	local explorer = M.get()
+	if explorer == nil then
+		return
+	end
+
+	local buf_id = vim.api.nvim_get_current_buf()
+	if not utils.is_opened_buffer(buf_id) then
+		return
+	end
+	local win_id = vim.api.nvim_get_current_win()
 	-- Compute lines
-	local buf_mappings = vim.api.nvim_buf_get_keymap(explorer_buf_id, "n")
+	local buf_mappings = vim.api.nvim_buf_get_keymap(buf_id, "n")
 	local map_data, desc_width = {}, 0
 	for _, data in ipairs(buf_mappings) do
 		if data.desc ~= nil then
@@ -709,21 +741,21 @@ function M.explorer_show_help(explorer_buf_id, explorer_win_id)
 	table.insert(lines, "(Press `q` to close)")
 
 	-- Create buffer
-	local buf_id = vim.api.nvim_create_buf(false, true)
-	M.set_buflines(buf_id, lines)
+	local help_buf_id = vim.api.nvim_create_buf(false, true)
+	M.set_buflines(help_buf_id, lines)
 
-	vim.keymap.set("n", "q", "<Cmd>close<CR>", { buffer = buf_id, desc = "Close this window" })
+	vim.keymap.set("n", "q", "<Cmd>close<CR>", { buffer = help_buf_id, desc = "Close this window" })
 
-	vim.b[buf_id].minicursorword_disable = true
-	vim.b[buf_id].miniindentscope_disable = true
+	vim.b[help_buf_id].minicursorword_disable = true
+	vim.b[help_buf_id].miniindentscope_disable = true
 
-	vim.bo[buf_id].filetype = "minifiles-help"
+	vim.bo[help_buf_id].filetype = "minifiles-help"
 
 	-- Compute window data
 	local line_widths = vim.tbl_map(vim.fn.strdisplaywidth, lines)
 	local max_line_width = math.max(unpack(line_widths))
 
-	local config = vim.api.nvim_win_get_config(explorer_win_id)
+	local config = vim.api.nvim_win_get_config(win_id)
 	config.relative = "win"
 	config.row = 0
 	config.col = 0
@@ -735,14 +767,14 @@ function M.explorer_show_help(explorer_buf_id, explorer_win_id)
 	config.style = "minimal"
 
 	-- Open window
-	local win_id = vim.api.nvim_open_win(buf_id, false, config)
-	highlight.window_update_highlight(win_id, "NormalFloat", "MiniFilesNormal")
-	highlight.window_update_highlight(win_id, "FloatTitle", "MiniFilesTitle")
-	highlight.window_update_highlight(win_id, "CursorLine", "MiniFilesCursorLine")
-	vim.wo[win_id].cursorline = true
+	local help_win_id = vim.api.nvim_open_win(help_buf_id, false, config)
+	highlight.window_update_highlight(help_win_id, "NormalFloat", "MiniFilesNormal")
+	highlight.window_update_highlight(help_win_id, "FloatTitle", "MiniFilesTitle")
+	highlight.window_update_highlight(help_win_id, "CursorLine", "MiniFilesCursorLine")
+	vim.wo[help_win_id].cursorline = true
 
-	vim.api.nvim_set_current_win(win_id)
-	return win_id
+	vim.api.nvim_set_current_win(help_win_id)
+	return help_win_id
 end
 
 function M.compute_visible_depth_range(explorer, opts)
@@ -772,7 +804,7 @@ end
 ---   buffers are forced to update.
 ---
 ---@param opts table|nil Table of options to update.
-function M.refresh(opts)
+function M.resize(opts)
 	local explorer = M.get()
 	if explorer == nil then
 		return
@@ -791,7 +823,7 @@ function M.refresh(opts)
 	-- current `opts` higher precedence
 	explorer.opts = utils.normalize_opts(explorer.opts, opts)
 
-	M.explorer_refresh(explorer, { force_update = force_update })
+	M.refresh(explorer, { force_update = force_update })
 end
 
 --- Synchronize explorer
@@ -812,7 +844,7 @@ function M.synchronize()
 		fs.actions_apply(fs_actions, explorer.opts)
 	end
 
-	M.explorer_refresh(explorer, { force_update = true })
+	M.refresh(explorer, { force_update = true })
 end
 
 --- Reset explorer
@@ -836,7 +868,7 @@ function M.reset()
 	end
 
 	-- Skip update cursors, as they are already set
-	M.explorer_refresh(explorer, { skip_update_cursor = true })
+	M.refresh(explorer, { skip_update_cursor = true })
 end
 
 --- Go in entry under cursor
@@ -862,7 +894,7 @@ function M.go_in(opts)
 	if should_close then
 		local validated_buf_id = buffer.validate_opened_buffer()
 		local validated_line = buffer.validate_line(validated_buf_id)
-		local fs_entry = fs.get_fs_entry(validated_buf_id,validated_line)
+		local fs_entry = fs.get_fs_entry(validated_buf_id, validated_line)
 		should_close = fs_entry ~= nil and fs_entry.fs_type == "file"
 	end
 
@@ -876,7 +908,7 @@ function M.go_in(opts)
 	local new_path = explorer.branch[explorer.depth_focus]
 	explorer.branch = { fs.get_parent(new_path) or "", new_path, "" }
 
-	M.explorer_refresh(explorer)
+	M.refresh(explorer)
 	M.update_preview(explorer)
 	if should_close then
 		M.close()
@@ -911,11 +943,11 @@ function M.go_out()
 	-- Make sure the views are properly initialized for all paths in the branch
 	for i, path in ipairs(explorer.branch) do
 		if path ~= "" and not explorer.views[path] then
-			explorer.views[path] = view.ensure_proper({}, path, explorer, setup_keymaps)
+			explorer.views[path] = view.ensure_proper({}, path, explorer)
 		end
 	end
 
-	local refreshed_explorer = M.explorer_refresh(explorer)
+	local refreshed_explorer = M.refresh(explorer)
 
 	-- Ensure the explorer is still registered as open
 	local tabpage_id = vim.api.nvim_get_current_tabpage()
@@ -933,7 +965,7 @@ function M.trim_left()
 	end
 
 	explorer = M.trim_branch_left(explorer)
-	M.explorer_refresh(explorer)
+	M.refresh(explorer)
 end
 
 --- Trim right part of branch
@@ -947,7 +979,7 @@ function M.trim_right()
 	end
 
 	explorer = M.trim_branch_right(explorer)
-	M.explorer_refresh(explorer)
+	M.refresh(explorer)
 end
 
 --- Reveal current working directory
@@ -977,25 +1009,7 @@ function M.reveal_cwd()
 		end
 	end
 
-	M.explorer_refresh(explorer)
-end
-
---- Show help window
----
---- - Open window with helpful information about currently shown explorer and
----   focus on it. To close it, press `q`.
-function M.show_help()
-	local explorer = M.get()
-	if explorer == nil then
-		return
-	end
-
-	local buf_id = vim.api.nvim_get_current_buf()
-	if not utils.is_opened_buffer(buf_id) then
-		return
-	end
-
-	M.explorer_show_help(buf_id, vim.api.nvim_get_current_win())
+	M.refresh(explorer)
 end
 
 --- Get target window
@@ -1018,19 +1032,19 @@ function M.go_in_with_count()
 	end
 end
 
-function M.go_in_plus ()
+function M.go_in_plus()
 	for _ = 1, vim.v.count1 do
 		M.go_in({ close_on_file = true })
 	end
 end
 
-function M.go_out_with_count ()
+function M.go_out_with_count()
 	for _ = 1, vim.v.count1 do
 		M.go_out()
 	end
 end
 
-function M.go_out_plus ()
+function M.go_out_plus()
 	M.go_out_with_count()
 	M.trim_right()
 end

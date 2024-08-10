@@ -2,6 +2,12 @@ local c = require("mini.config")
 
 local M = {}
 
+---@class CursorChangedData
+---@field buf number
+
+---@class TextChangedData
+---@field buf number
+
 -- Namespaces
 
 -- File system information
@@ -190,8 +196,10 @@ function M.get_first_valid_normal_window()
   end
 end
 
-function M.get_path_depth(explorer, path)
-	for depth, depth_path in pairs(explorer.branch) do
+---@param branch ExplorerBranch
+---@param path string
+function M.get_path_depth(branch, path)
+	for depth, depth_path in pairs(branch) do
 		if path == depth_path then
 			return depth
 		end
