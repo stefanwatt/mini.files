@@ -63,8 +63,12 @@ M.explorer_path_history = {}
 -- Register of opened explorers per tabpage
 M.opened_explorers = {}
 
+
 -- Explorers ------------------------------------------------------------------
----@class Explorer
+---@class MiniFilesExplorerOpts
+---TODO: define
+--
+---@class MiniFilesExplorer
 ---
 ---@field branch table Array of absolute directory paths from parent to child.
 ---   Its ids are called depth.
@@ -167,6 +171,8 @@ function M.open(path, use_latest, opts)
 	-- Track lost focus
 	M.explorer_track_lost_focus()
 	M.update_preview(explorer)
+	view.add_event_listener("refresh_explorer", M.explorer_refresh)
+	view.add_event_listener("sync_cursor", M.explorer_sync_cursor_and_branch)
 
 	-- Trigger appropriate event
 	utils.trigger_event("MiniFilesExplorerOpen")
@@ -300,22 +306,24 @@ function M.explorer_refresh(explorer, opts)
 
 	-- Always show three columns
 	local total_width = vim.o.columns
-	local col_width = math.floor(total_width / 3)
+	local left_col_width = math.floor(20 * total_width / 100)
+	local center_col_width = math.floor(20 * total_width / 100)
+	local right_col_width = math.floor(60 * total_width / 100)
 
 	-- Left column (parent or empty)
 	local left_path = explorer.branch[1] or ""
 
-	M.refresh_depth_window(explorer, 1, 1, 0, col_width, left_path)
+	M.refresh_depth_window(explorer, 1, 1, 0, left_col_width, left_path)
 
 	-- Middle column (current focus)
 	local middle_path = explorer.branch[2] or ""
 
-	M.refresh_depth_window(explorer, 2, 2, col_width, col_width, middle_path)
+	M.refresh_depth_window(explorer, 2, 2, center_col_width, center_col_width, middle_path)
 
 	-- Right column (preview)
 	local right_path = explorer.branch[3] or ""
 
-	M.refresh_preview_window(explorer, 3, col_width * 2, col_width, right_path)
+	M.refresh_preview_window(explorer, 3, right_col_width * 2, right_col_width, right_path)
 
 	-- Always focus on the middle window
 	local win_id_focused = explorer.windows[2]
@@ -431,7 +439,7 @@ function M.explorer_sync_cursor_and_branch(explorer, depth)
 	local cursor_path
 	if type(cursor) == "table" and utils.is_valid_buf(buf_id) then
 		local l = utils.get_bufline(buf_id, cursor[1])
-		cursor_path = fs.path_index[utils.match_line_path_id(l)]
+		cursor_path = require("mini.fs").path_index[utils.match_line_path_id(l)]
 	elseif type(cursor) == "string" then
 		cursor_path = fs.child_path(path, cursor)
 	else
@@ -477,7 +485,7 @@ function M.focus_on_entry(explorer, path, entry_name)
 	end
 
 	-- Set focus on directory. Reset if it is not in current branch.
-	explorer.depth_focus = M.get_path_depth(explorer, path)
+	explorer.depth_focus = utils.get_path_depth(explorer, path)
 	if explorer.depth_focus == nil then
 		explorer.branch, explorer.depth_focus = { path }, 1
 	end
@@ -586,14 +594,6 @@ function M.refresh_depth_window(explorer, depth, win_count, win_col, win_width, 
 
 	explorer.views = views
 	explorer.windows = windows
-end
-
-function M.get_path_depth(explorer, path)
-	for depth, depth_path in pairs(explorer.branch) do
-		if path == depth_path then
-			return depth
-		end
-	end
 end
 
 function M.confirm_modified(explorer, action_name)

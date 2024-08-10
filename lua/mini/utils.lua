@@ -190,4 +190,12 @@ function M.get_first_valid_normal_window()
   end
 end
 
+function M.get_path_depth(explorer, path)
+	for depth, depth_path in pairs(explorer.branch) do
+		if path == depth_path then
+			return depth
+		end
+	end
+end
+
 return M

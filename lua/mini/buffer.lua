@@ -76,14 +76,14 @@ function M.buffer_update_directory(buf_id, path, opts)
 	local fs_entries = fs.read_dir(path, opts.content)
 
 	-- - Compute format expression resulting into same width path ids
-	local path_width = math.floor(math.log10(#fs.path_index)) + 1
+	local path_width = math.floor(math.log10(#require("mini.fs").path_index)) + 1
 	local line_format = "/%0" .. path_width .. "d/%s/%s"
 
 	local prefix_fun = opts.content.prefix
 	for _, entry in ipairs(fs_entries) do
 		local prefix, hl = prefix_fun(entry)
 		prefix, hl = prefix or "", hl or ""
-		table.insert(lines, string.format(line_format, fs.path_index[entry.path], prefix, entry.name))
+		table.insert(lines, string.format(line_format, require("mini.fs").path_index[entry.path], prefix, entry.name))
 		table.insert(icon_hl, hl)
 		table.insert(name_hl, entry.fs_type == "directory" and "MiniFilesDirectory" or "MiniFilesFile")
 	end
@@ -101,7 +101,7 @@ function M.buffer_update_file(buf_id, path, opts)
 	local fd = vim.loop.fs_open(path, "r", 1)
 	if fd == nil then
 		utils.error("file or directory not found: " .. path)
-		return
+		return {}
 	end
 	local is_text = vim.loop.fs_read(fd, 1024):find("\0") == nil
 	vim.loop.fs_close(fd)
@@ -122,8 +122,7 @@ function M.buffer_update_file(buf_id, path, opts)
 	if highlight.buffer_should_highlight(buf_id) then
 		local ft = vim.filetype.match({ buf = buf_id, filename = path })
     if not ft then
-      utils.error("could not determine filetype of path: " .. path)
-      return
+      return {}
     end
 		local has_lang, lang = pcall(vim.treesitter.language.get_lang, ft)
 		local has_ts, _ = pcall(vim.treesitter.start, buf_id, has_lang and lang or ft)
@@ -155,7 +154,7 @@ function M.compute_fs_diff(buf_id, ref_path_ids)
 	-- Process present file system entries
 	for _, l in ipairs(lines) do
 		local path_id = utils.match_line_path_id(l)
-		local path_from = fs.path_index[path_id]
+		local path_from = require("mini.fs").path_index[path_id]
 
 		-- Use whole line as name if no path id is detected
 		local name_to = path_id ~= nil and l:sub(utils.match_line_offset(l)) or l
@@ -174,7 +173,7 @@ function M.compute_fs_diff(buf_id, ref_path_ids)
 	-- Detect missing file system entries
 	for _, ref_id in ipairs(ref_path_ids) do
 		if not present_path_ids[ref_id] then
-			table.insert(res, { from = fs.path_index[ref_id], to = nil })
+			table.insert(res, { from = require("mini.fs").path_index[ref_id], to = nil })
 		end
 	end
 
