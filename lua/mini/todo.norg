@@ -3,10 +3,9 @@
 
   - (x) view_track_cursor without circ dependency
   - (x) = does does something, but the file is not stored on disk
-  - ( ) right column has some cut off chars
-  - ( ) cursor is always shifted left one if its at the end of the line
-  - ( ) preview is not updating 
-  - ( ) path id is missing
+  - (x) right column has some cut off chars
+  - (x) cursor is always shifted left one if its at the end of the line
+  - (x) preview is not updating 
 ** Chores
   - ( ) lets see if we can get rid of this nonsense opts object on explorer
-  - ( ) add annotations everywhere
+  - (-) add annotations everywhere

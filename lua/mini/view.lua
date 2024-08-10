@@ -105,8 +105,6 @@ M.track_cursor = vim.schedule_wrap(function(explorer, data)
 
 	-- Ensure cursor line doesn't contradict window on the right
 	local tabpage_id = vim.api.nvim_win_get_tabpage(win_id)
-	-- TODO: i hope the one from refresh_depth_window is the correct one
-	-- local explorer = M.explorer_get(tabpage_id)
 	if explorer == nil then
 		return
 	end
@@ -152,20 +150,17 @@ function M.track_text_change(data)
 		return
 	end
 
-	local n_lines = vim.api.nvim_buf_line_count(buf_id)
-	-- local height = math.min(n_lines, H.window_get_max_height())
-	local height = win.window_get_max_height()
-	-- TODO: only needs to happen once since we have a static height now
-	vim.api.nvim_win_set_height(win_id, height)
-
+	--TODO: not sure if this is neede
 	-- Ensure that only buffer lines are shown. This can be not the case if after
 	-- text edit cursor moved past previous last line.
-	local last_visible_line = vim.fn.line("w0", win_id) + height - 1
-	local out_of_buf_lines = last_visible_line - n_lines
-	-- - Possibly scroll window upward (`\25` is an escaped `<C-y>`)
-	if out_of_buf_lines > 0 then
-		vim.cmd("normal! " .. out_of_buf_lines .. "\25")
-	end
+	-- local n_lines = vim.api.nvim_buf_line_count(buf_id)
+	-- local height = win.window_get_max_height()
+	-- local last_visible_line = vim.fn.line("w0", win_id) + height - 1
+	-- local out_of_buf_lines = last_visible_line - n_lines
+	-- -- - Possibly scroll window upward (`\25` is an escaped `<C-y>`)
+	-- if out_of_buf_lines > 0 then
+	-- 	vim.cmd("normal! " .. out_of_buf_lines .. "\25")
+	-- end
 end
 
 return M

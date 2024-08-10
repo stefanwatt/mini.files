@@ -436,6 +436,9 @@ function M.normalize(explorer)
 	return explorer
 end
 
+---@param explorer Explorer
+---@param depth number
+---@return Explorer
 function M.sync_cursor_and_branch(explorer, depth)
 	-- Compute helper data while making early returns
 	if #explorer.branch < depth then
