@@ -1,6 +1,8 @@
 local highlight = require("mini.highlight")
 local buffer = require("mini.buffer")
 local utils = require("mini.utils")
+local fs = require("mini.fs")
+
 local M = {}
 
 function M.window_open(buf_id, config)

@@ -7,7 +7,7 @@ local M         = {}
 ---@alias RefreshExplorerFun fun(explorer: Explorer, opts: ExplorerOpts)
 ---@alias SyncCursorFun fun(explorer: Explorer, depth: number)
 
----@class MiniFilesViewEventListeners 
+---@class mini_files.ViewEventListeners 
  ---@field refresh_explorer RefreshExplorerFun
 M.event_listeners = {}
 

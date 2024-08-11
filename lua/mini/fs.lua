@@ -1,13 +1,28 @@
 local utils = require("mini.utils")
+local lsp_helpers = require("mini.lsp.helpers")
+
 local M = {}
 -- Index of all visited files
 M.path_index = {}
 
 
+---@class mini_files.FSEventListeners 
+---@field rename_loaded_buffer RenameLoadedBufferFun
+---@field hide_explorer fun()
+M.event_listeners = {}
+
+
+---@alias RenameLoadedBufferFun fun(buf_id: number, from: string, to:string)
+
+---@param event "rename_loaded_buffer" | "hide_explorer"
+---@param callback RenameLoadedBufferFun | fun()
+function M.add_event_listener(event, callback)
+	M.event_listeners[event] = callback
+end
 -- Register of latest used paths per tabpage
 M.latest_paths = {}
 
----@class fs_entry
+---@class mini_files.FS_Entry
 ---@field name string Base name.
 ---@field fs_type string One of "directory" or "file".
 ---@field path string Full path.
@@ -28,7 +43,7 @@ function M.read_dir(path, content_opts)
 
   -- Filter and sort entries
   --HACK: what in the fuck even is this architecture....
-  --putting callback functions inside the explorer.opts 
+  --putting callback functions inside the explorer.opts
   --nobody in the world can understand this nonsense
   res = content_opts.sort(vim.tbl_filter(content_opts.filter, res))
 
@@ -60,6 +75,7 @@ function M.replace_path_in_index(from, to)
 end
 
 function M.normalize_path(path) return (path:gsub('/+', '/'):gsub('(.)/$', '%1')) end
+
 if M.is_windows then
   function M.normalize_path(path) return (path:gsub('\\', '/'):gsub('/+', '/'):gsub('(.)/$', '%1')) end
 end
@@ -106,8 +122,8 @@ end
 -- TODO: find better name
 function M.actions_confirm(fs_actions)
   if not require("mini.config").config.options.confirm_fs_actions then
-		return true
-	end
+    return true
+  end
   local msg = table.concat(M.actions_to_lines(fs_actions), '\n')
   local confirm_res = vim.fn.confirm(msg, '&Yes\n&No', 1, 'Question')
   return confirm_res == 1
@@ -168,7 +184,40 @@ function M.actions_to_lines(fs_actions)
   return res
 end
 
-function M.actions_apply(fs_actions, opts)
+---@alias mini_files.EntryType "file"|"directory"|"socket"|"link"|"fifo"
+---@alias mini_files.FS_Action mini_files.CreateAction|mini_files.DeleteAction|mini_files.MoveAction|mini_files.CopyAction|mini_files.ChangeAction
+
+---@class (exact) mini_files.CreateAction
+---@field type "create"
+---@field url string
+---@field entry_type mini_files.EntryType
+---@field link nil|string
+
+---@class (exact) mini_files.DeleteAction
+---@field type "delete"
+---@field url string
+---@field entry_type mini_files.EntryType
+
+---@class (exact) mini_files.MoveAction
+---@field type "move"
+---@field entry_type mini_files.EntryType
+---@field src_url string
+---@field dest_url string
+
+---@class (exact) mini_files.CopyAction
+---@field type "copy"
+---@field entry_type mini_files.EntryType
+---@field src_url string
+---@field dest_url string
+
+---@class (exact) mini_files.ChangeAction
+---@field type "change"
+---@field entry_type mini_files.EntryType
+---@field url string
+---@field column string
+---@field value any
+---
+function M.apply_fs_actions(fs_actions)
   -- Copy first to allow later proper deleting
   for _, diff in ipairs(fs_actions.copy) do
     local ok, success = pcall(M.copy, diff.from, diff.to)
@@ -183,20 +232,49 @@ function M.actions_apply(fs_actions, opts)
   end
 
   for _, diff in ipairs(fs_actions.move) do
-    local ok, success = pcall(M.move, diff.from, diff.to)
     local data = { action = 'move', from = diff.from, to = diff.to }
-    if ok and success then utils.trigger_event('MiniFilesActionMove', data) end
+    local did_complete = lsp_helpers.will_perform_file_operations({
+      {
+        type = "move",
+        entry_type = "file",
+        src_url = data.from,
+        dest_url = data.to
+      }
+    })
+    local ok, success = pcall(M.move, diff.from, diff.to)
+    if ok and success then
+      -- M.event_listeners.hide_explorer()
+      vim.schedule(function()
+        did_complete()
+        utils.trigger_event('MiniFilesActionMove', data)
+      end)
+    end
   end
 
   for _, diff in ipairs(fs_actions.rename) do
-    local ok, success = pcall(M.rename, diff.from, diff.to)
     local data = { action = 'rename', from = diff.from, to = diff.to }
-    if ok and success then utils.trigger_event('MiniFilesActionRename', data) end
+    local did_complete = lsp_helpers.will_perform_file_operations({
+      {
+        type = "move",
+        entry_type = "file",
+        src_url = data.from,
+        dest_url = data.to
+      }
+    })
+    local ok, success = pcall(M.rename, diff.from, diff.to)
+    if ok and success then
+      -- M.event_listeners.hide_explorer()
+      vim.schedule(function()
+        did_complete()
+        utils.trigger_event('MiniFilesActionRename', data)
+      end)
+    end
   end
 
   -- Delete last to not lose anything too early (just in case)
   for _, path in ipairs(fs_actions.delete) do
-    local ok, success = pcall(M.delete, path, opts.options.permanent_delete)
+    local config = require("mini.config").get_config()
+    local ok, success = pcall(M.delete, path, config.options.permanent_delete)
     local data = { action = 'delete', from = path }
     if ok and success then utils.trigger_event('MiniFilesActionDelete', data) end
   end
@@ -275,7 +353,7 @@ function M.move(from, to)
 
   -- Rename in loaded buffers
   for _, buf_id in ipairs(vim.api.nvim_list_bufs()) do
-    M.rename_loaded_buffer(buf_id, from, to)
+    M.event_listeners.rename_loaded_buffer(buf_id, from, to)
   end
 
   return success
@@ -313,7 +391,7 @@ end
 --- Note: if latest used `path` argument for |M.open()| was for file,
 --- this will return its parent (as it was used as anchor path).
 function M.get_latest_path()
-	return utils.latest_paths[vim.api.nvim_get_current_tabpage()]
+  return utils.latest_paths[vim.api.nvim_get_current_tabpage()]
 end
 
 return M

@@ -6,7 +6,7 @@ local win = require("mini.window")
 local fs = require("mini.fs")
 local M = {}
 
----@class MiniFilesKeymaps
+---@class mini_files.Keymaps
 ---@field close string
 ---@field go_in string
 ---@field go_in_plus string
@@ -81,13 +81,13 @@ M.path_history = {}
 M.opened_explorers = {}
 
 -- Explorers ------------------------------------------------------------------
----@class ExplorerBranch
+---@class mini_files.ExplorerBranch
 ---TODO: define
 --
----@class ExplorerOpts
+---@class mini_files.ExplorerOpts
 ---TODO: define
 --
----@class Explorer
+---@class mini_files.Explorer
 ---
 ---@field branch table Array of absolute directory paths from parent to child.
 ---   Its ids are called depth.
@@ -142,6 +142,7 @@ end
 ---   `vim.b.minifiles_config` for this particular explorer session.
 function M.open(path, use_latest, opts)
 	-- Validate path: allow only valid file system path
+	fs.add_event_listener("close_explorer", M.close)
 	path = fs.full_path(path or vim.fn.getcwd())
 
 	local fs_type = fs.get_type(path)
@@ -384,6 +385,7 @@ function M.refresh_preview_window(explorer, win_count, win_col, win_width, previ
 	explorer.windows = windows
 end
 
+
 M.timers = {
 	focus = vim.loop.new_timer(),
 }
@@ -519,6 +521,7 @@ function M.focus_on_entry(explorer, path, entry_name)
 	return explorer
 end
 
+---@param explorer mini_files.Explorer
 function M.compute_fs_actions(explorer)
 	-- Compute differences
 	local fs_diffs = {}
@@ -844,7 +847,7 @@ function M.synchronize()
 	-- Parse and apply file system operations
 	local fs_actions = M.compute_fs_actions(explorer)
 	if fs_actions ~= nil and fs.actions_confirm(fs_actions) then
-		fs.actions_apply(fs_actions, explorer.opts)
+		fs.apply_fs_actions(fs_actions)
 	end
 
 	M.refresh(explorer, { force_update = true })

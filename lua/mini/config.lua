@@ -10,7 +10,10 @@ M.config = {
     -- In which order to show file system entries
     sort = nil,
   },
-
+  lsp_file_methods = {
+    timeout_ms = 500,
+    autosave_changes = true
+  },
   -- Module mappings created only inside explorer.
   -- Use `''` (empty string) to not create one.
   mappings = {

@@ -16,7 +16,7 @@ M.opened_buffers = {}
 ---@alias TrackCursorFun fun(explorer: Explorer, data: CursorChangedData)
 ---@alias TrackTextChangeFun fun(data: TextChangedData)
 
----@class MiniFilesBufferEventListeners 
+---@class mini_files.BufferEventListeners 
 ---@field setup_keymaps SetupKeymapsFun
 ---@field track_cursor TrackCursorFun
 ---@field track_text_change TrackTextChangeFun
@@ -34,6 +34,7 @@ end
 function M.buffer_create(path)
 	-- Create buffer
 	local buf_id = vim.api.nvim_create_buf(false, true)
+	fs.add_event_listener('rename_loaded_buffer', M.rename_loaded_buffer)
 
 	-- Register buffer
 	M.opened_buffers[buf_id] = { path = path }
